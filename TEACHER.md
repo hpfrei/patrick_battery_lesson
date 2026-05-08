@@ -165,6 +165,19 @@ print(json.loads(urllib.request.urlopen("http://127.0.0.1:5050/api/products").re
 Drives the point home: **the browser is just one client.** The server
 speaks HTTP, and that's a public contract.
 
+Then go one layer deeper: open `shop.db` directly with the `sqlite3`
+shell (see §6 for install — it's a single binary on Windows).
+
+```sql
+sqlite> .tables
+sqlite> SELECT name, stock FROM products WHERE chemistry = 'Li-ion';
+```
+
+Same point as before: the server is *one* client of the database, and
+SQL is its public contract. §6 has a copy-pasteable list of
+catalogue / JOIN / aggregate queries to run during this slot or as
+take-home material.
+
 ### 0:50 – 1:00 — Break
 
 ### 1:00 – 1:35 — Exercise A (pick one — pair students up)
@@ -257,7 +270,154 @@ Errors come back as `4xx` with `{"error": "..."}` JSON.
 
 ---
 
-## 6. Files in this lab
+## 6. Talk to the database directly with SQL
+
+The HTTP server is one client of the database. Students can be another.
+Connecting straight to `shop.db` with a SQL prompt makes it visceral
+that "the database" is just a file.
+
+> **Heads-up:** SQLite handles concurrent **reads** fine, so
+> `SELECT`s while the server is running are safe. For `INSERT` /
+> `UPDATE` / `DELETE` it's simpler to **stop the server first** to
+> avoid brief lock contention and to make sure the server's view
+> doesn't go stale behind the UI.
+
+### Option A — `sqlite3` command-line shell (recommended)
+
+The `sqlite3` CLI is a single binary. **Python's standard library does
+not ship it** — you need to install it once.
+
+**Windows** (no admin rights needed):
+
+1. Go to <https://www.sqlite.org/download.html>.
+2. Under **Precompiled Binaries for Windows**, download
+   `sqlite-tools-win-x64-*.zip`.
+3. Unzip it. Inside is `sqlite3.exe`. Drop it into the project folder
+   next to `shop.db` (or anywhere on your `PATH`).
+4. Open Command Prompt in the project folder and run:
+
+   ```
+   sqlite3 shop.db
+   ```
+
+**Linux:**
+
+```bash
+sudo apt install sqlite3      # Debian / Ubuntu / WSL
+sudo dnf install sqlite       # Fedora
+sudo pacman -S sqlite         # Arch
+
+sqlite3 shop.db
+```
+
+Once at the `sqlite>` prompt, a few useful dot-commands:
+
+```
+.tables              -- list tables
+.schema products     -- show the CREATE TABLE for one table
+.headers on          -- show column headers in query results
+.mode column         -- pretty-print as aligned columns
+.quit                -- exit
+```
+
+### Option B — Python's built-in `sqlite3` module (no install)
+
+Every student already has Python, so this needs zero extra setup.
+Python 3.12+ even has an interactive shell built in:
+
+```bash
+python -m sqlite3 shop.db        # Python 3.12+
+```
+
+On older Pythons, a one-liner works:
+
+```bash
+python -c "import sqlite3; [print(r) for r in sqlite3.connect('shop.db').execute('SELECT id, name, price_cents, stock FROM products')]"
+```
+
+…or open a regular `python` REPL:
+
+```python
+import sqlite3
+con = sqlite3.connect("shop.db")
+for row in con.execute("SELECT name, stock FROM products ORDER BY stock"):
+    print(row)
+```
+
+### Option C — DB Browser for SQLite (GUI)
+
+A free cross-platform GUI: <https://sqlitebrowser.org/dl/>.
+Open `shop.db` → **Browse Data** tab to click around the rows, or
+**Execute SQL** to run queries. Useful for visual learners.
+
+### Queries to try
+
+Drop these into the `sqlite3` prompt one at a time:
+
+```sql
+-- 1. The whole catalogue, prettily
+SELECT id, name, chemistry, price_cents/100.0 AS price_usd, stock
+FROM products
+ORDER BY price_cents;
+
+-- 2. What's running low on stock?
+SELECT name, stock FROM products WHERE stock < 50 ORDER BY stock;
+
+-- 3. Group by chemistry: how many SKUs and what's the average price?
+SELECT chemistry,
+       COUNT(*)                             AS sku_count,
+       ROUND(AVG(price_cents) / 100.0, 2)   AS avg_price_usd
+FROM products
+GROUP BY chemistry
+ORDER BY sku_count DESC;
+
+-- 4. All orders with a shipped/delivered status, newest first
+SELECT id, customer_name, status, total_cents/100.0 AS total_usd, created_at
+FROM orders
+WHERE status IN ('shipped', 'delivered')
+ORDER BY created_at DESC;
+
+-- 5. JOIN: list every line item across every order
+SELECT o.id           AS order_id,
+       o.customer_name,
+       oi.product_name,
+       oi.quantity,
+       oi.unit_price_cents/100.0 AS unit_price_usd
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.id
+ORDER BY o.id, oi.id;
+
+-- 6. Three-table JOIN: revenue per chemistry
+SELECT p.chemistry,
+       SUM(oi.unit_price_cents * oi.quantity) / 100.0 AS revenue_usd
+FROM order_items oi
+JOIN products p ON p.id = oi.product_id
+JOIN orders   o ON o.id = oi.order_id
+WHERE o.status != 'cancelled'
+GROUP BY p.chemistry
+ORDER BY revenue_usd DESC;
+
+-- 7. Best-selling product (units sold)
+SELECT product_name, SUM(quantity) AS units_sold
+FROM order_items
+GROUP BY product_name
+ORDER BY units_sold DESC
+LIMIT 5;
+```
+
+Discussion prompts after running these:
+
+- Query 6 joins three tables. Trace each `ON` condition on the
+  whiteboard. What would happen if we forgot one of them?
+- Query 5 reads `oi.product_name` from `order_items`, **not** from
+  `products`. Why was it stored there as a snapshot?
+- Try `UPDATE products SET price_cents = 999 WHERE id = 1;` — confirm
+  past orders still show the *old* price (they snapshot it). Same
+  reason real shops don't retroactively rewrite invoices.
+
+---
+
+## 7. Files in this lab
 
 - `seed_db.py`  — creates `shop.db`: products + orders + order_items.
 - `server.py`   — HTTP server on `127.0.0.1:5050`.
