@@ -6,11 +6,21 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 <style>
   main { padding: 1rem; max-width: 1200px; }
-  nav.tabs { border-bottom: 1px solid var(--pico-muted-border-color); margin-bottom: 1rem; }
-  nav.tabs ul { padding: 0; }
-  nav.tabs button { background: none; border: none; padding: .6rem 1rem; cursor: pointer;
-                    color: var(--pico-color); border-bottom: 2px solid transparent; }
-  nav.tabs button.active { border-bottom-color: var(--pico-primary); font-weight: bold; }
+  nav.tabs { background: var(--pico-card-background-color);
+             border: 1px solid var(--pico-muted-border-color);
+             border-radius: .5rem; padding: .25rem;
+             margin-bottom: 1.25rem; }
+  nav.tabs ul { padding: 0; margin: 0; gap: .25rem; }
+  nav.tabs li { padding: 0; }
+  nav.tabs button { background: transparent; border: none; border-radius: .375rem;
+                    padding: .55rem 1.1rem; cursor: pointer; font-weight: 500;
+                    color: var(--pico-muted-color); transition: background .15s, color .15s; }
+  nav.tabs button:hover { background: var(--pico-secondary-background);
+                          color: var(--pico-color); }
+  nav.tabs button.active { background: var(--pico-primary);
+                           color: var(--pico-primary-inverse); font-weight: 600; }
+  nav.tabs button.active:hover { background: var(--pico-primary-hover);
+                                 color: var(--pico-primary-inverse); }
   .hidden { display: none; }
 
   .grid-products { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
