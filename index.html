@@ -2,160 +2,380 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Battery Browser</title>
-<!-- Pico CSS: zero-config styling for plain HTML -->
+<title>🔋 Battery Shop</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 <style>
   main { padding: 1rem; max-width: 1200px; }
-  .filters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
-  @media (max-width: 800px) { .filters { grid-template-columns: 1fr 1fr; } }
-  select[multiple] { min-height: 7rem; }
-  table { font-size: .85rem; }
-  td button { padding: .1rem .4rem; font-size: .8rem; }
+  nav.tabs { border-bottom: 1px solid var(--pico-muted-border-color); margin-bottom: 1rem; }
+  nav.tabs ul { padding: 0; }
+  nav.tabs button { background: none; border: none; padding: .6rem 1rem; cursor: pointer;
+                    color: var(--pico-color); border-bottom: 2px solid transparent; }
+  nav.tabs button.active { border-bottom-color: var(--pico-primary); font-weight: bold; }
+  .hidden { display: none; }
+
+  .grid-products { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+                   gap: 1rem; }
+  .product article { margin: 0; padding: 1rem; height: 100%; display: flex; flex-direction: column; }
+  .product h4 { margin: 0 0 .25rem 0; font-size: 1rem; }
+  .product .meta { font-size: .8rem; color: var(--pico-muted-color); margin-bottom: .5rem; }
+  .product p { font-size: .85rem; flex: 1; }
+  .product .price { font-size: 1.2rem; font-weight: bold; }
+  .product .stock { font-size: .8rem; color: var(--pico-muted-color); }
+  .product .row { display: flex; gap: .5rem; align-items: center; margin-top: .5rem; }
+  .product input[type=number] { width: 5rem; margin: 0; }
+  .product button { margin: 0; padding: .4rem .8rem; }
+
+  .cart-sticky { position: sticky; top: 0; }
+  .cart table { font-size: .85rem; }
+  .cart td button { padding: .1rem .4rem; }
+
+  table.orders { font-size: .9rem; }
+  .order-detail { background: var(--pico-card-background-color); }
+  .order-detail td { padding: .5rem 1rem; }
+  .badge { display: inline-block; padding: .15rem .5rem; border-radius: .25rem;
+           font-size: .75rem; font-weight: bold; text-transform: uppercase; }
+  .b-pending    { background: #fff4cc; color: #7a5a00; }
+  .b-processing { background: #cce5ff; color: #003e7a; }
+  .b-shipped    { background: #d4edda; color: #155724; }
+  .b-delivered  { background: #c3e6cb; color: #0b3d17; }
+  .b-cancelled  { background: #f8d7da; color: #721c24; }
+
+  .filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  @media (max-width: 800px) { .filters { grid-template-columns: 1fr; } }
+
+  .toast { position: fixed; bottom: 1rem; right: 1rem; background: var(--pico-primary);
+           color: var(--pico-primary-inverse); padding: .75rem 1rem; border-radius: .5rem;
+           opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 999; }
+  .toast.show { opacity: 1; }
 </style>
 </head>
 <body>
 <main>
-  <h1>🔋 Battery Browser</h1>
+  <h1>🔋 Battery Shop</h1>
 
-  <article>
-    <div class="filters">
-      <label>Chemistry      <select id="f-chemistry"   multiple></select></label>
-      <label>Form factor    <select id="f-form_factor" multiple></select></label>
-      <label>Manufacturer   <select id="f-manufacturer" multiple></select></label>
-      <label>Min mAh        <input  id="f-min_capacity" type="number" min="0"></label>
-    </div>
-    <div role="group">
-      <button onclick="search()">Search</button>
-      <button class="secondary" onclick="reset()">Show all</button>
-      <button class="contrast"  onclick="showStats()">Stats</button>
-    </div>
-    <small id="status"></small>
-  </article>
+  <nav class="tabs">
+    <ul>
+      <li><button id="tab-shop"  class="active" onclick="showTab('shop')">Shop</button></li>
+      <li><button id="tab-cart"  onclick="showTab('cart')">Cart (<span id="cart-count">0</span>)</button></li>
+      <li><button id="tab-admin" onclick="showTab('admin')">Admin</button></li>
+    </ul>
+  </nav>
 
-  <article><figure><table id="grid"></table></figure></article>
-
-  <article>
-    <h3>Add a battery</h3>
-    <div class="filters">
-      <label>Name *          <input id="a-name"></label>
-      <label>Manufacturer    <input id="a-manufacturer"></label>
-      <label>Chemistry *     <input id="a-chemistry"></label>
-      <label>Form factor     <input id="a-form_factor"></label>
-      <label>Capacity (mAh)  <input id="a-capacity_mah"    type="number"></label>
-      <label>Voltage (V)     <input id="a-voltage_v"       type="number" step="0.01"></label>
-      <label>Weight (g)      <input id="a-weight_g"        type="number" step="0.1"></label>
-      <label>Year            <input id="a-year_introduced" type="number"></label>
-    </div>
-    <label><input id="a-rechargeable" type="checkbox"> Rechargeable</label>
-    <label>Notes <input id="a-notes"></label>
-    <button onclick="add()">Add</button>
-  </article>
-
-  <!-- Stats: native modal, no library needed -->
-  <dialog id="stats-dlg">
+  <!-- ============ SHOP TAB ============ -->
+  <section id="view-shop">
     <article>
-      <header><strong>Stats by chemistry</strong></header>
-      <table id="stats-grid"></table>
-      <footer><form method="dialog"><button>Close</button></form></footer>
+      <div class="filters">
+        <label>Chemistry   <select id="f-chemistry"></select></label>
+        <label>Form factor <select id="f-form_factor"></select></label>
+        <label>Search      <input  id="f-search" placeholder="name, manufacturer..."></label>
+      </div>
     </article>
-  </dialog>
+
+    <div id="products" class="grid-products"></div>
+  </section>
+
+  <!-- ============ CART TAB ============ -->
+  <section id="view-cart" class="hidden">
+    <article class="cart">
+      <h3>Your cart</h3>
+      <table id="cart-table"></table>
+      <p><strong>Total: $<span id="cart-total">0.00</span></strong></p>
+      <button class="secondary" onclick="emptyCart()">Empty cart</button>
+    </article>
+
+    <article id="checkout-card">
+      <h3>Checkout</h3>
+      <p><small>No payment is taken — this is an order request. We'll contact you to arrange delivery.</small></p>
+      <div class="filters">
+        <label>Name *    <input id="c-name"></label>
+        <label>Email *   <input id="c-email"   type="email"></label>
+        <label>Address * <input id="c-address"></label>
+      </div>
+      <label>Notes (optional) <textarea id="c-notes" rows="2"></textarea></label>
+      <button id="place-btn" onclick="placeOrder()">Place order</button>
+      <small id="checkout-status"></small>
+    </article>
+  </section>
+
+  <!-- ============ ADMIN TAB ============ -->
+  <section id="view-admin" class="hidden">
+    <article>
+      <h3>All orders</h3>
+      <p><small>Click a row to expand line items. Change status from the dropdown.</small></p>
+      <button class="secondary outline" onclick="loadOrders()">↻ Refresh</button>
+      <figure>
+        <table class="orders" id="orders-table"></table>
+      </figure>
+    </article>
+  </section>
+
+  <div id="toast" class="toast"></div>
 </main>
 
 <script>
-// Columns the API returns; drives table headers and the add form
-const COLS    = ["id","name","manufacturer","chemistry","form_factor",
-                 "capacity_mah","voltage_v","weight_g","rechargeable","year_introduced","notes"];
-const FILTERS = ["chemistry","form_factor","manufacturer"];
-
 const $   = id => document.getElementById(id);
-const api = (path, opts) => fetch(path, opts).then(r => r.json());
+const api = (path, opts) => fetch(path, opts).then(r => r.json().then(j => ({ok: r.ok, status: r.status, body: j})));
+const fmt = c => "$" + (c / 100).toFixed(2);
 
-// Cached "all rows" — used to populate the filter dropdowns
-let allRows = [];
+// ---------- state ----------
+let products = [];
+let cart = JSON.parse(localStorage.getItem("cart") || "{}"); // {productId: qty}
+const saveCart = () => { localStorage.setItem("cart", JSON.stringify(cart)); updateCartCount(); };
+const cartCount = () => Object.values(cart).reduce((a, b) => a + b, 0);
+const updateCartCount = () => { $("cart-count").textContent = cartCount(); };
 
-// Sorted unique values for one column
-const distinct = f => [...new Set(allRows.map(r => r[f]).filter(Boolean))].sort();
-// Selected option values from a <select multiple>
-const picked   = id => [...$(id).selectedOptions].map(o => o.value);
-
-// Fetch all rows, fill dropdowns, render table
-async function loadAll() {
-  ({rows: allRows} = await api("/api/batteries"));
-  for (const f of FILTERS)
-    $("f-"+f).innerHTML = distinct(f).map(v => `<option>${v}</option>`).join("");
-  render(allRows);
+// ---------- tabs ----------
+function showTab(name) {
+  for (const t of ["shop", "cart", "admin"]) {
+    $("view-" + t).classList.toggle("hidden", t !== name);
+    $("tab-"  + t).classList.toggle("active", t === name);
+  }
+  if (name === "cart")  renderCart();
+  if (name === "admin") loadOrders();
 }
 
-// Build ?chemistry=X&chemistry=Y&... and ask server to filter
-async function search() {
-  const p = new URLSearchParams();
-  for (const f of FILTERS) picked("f-"+f).forEach(v => p.append(f, v));
-  if ($("f-min_capacity").value) p.set("min_capacity", $("f-min_capacity").value);
-  const qs = p.toString();
-  const {rows} = await api("/api/batteries" + (qs ? "?"+qs : ""));
-  render(rows);
+// ---------- shop ----------
+async function loadProducts() {
+  const {body} = await api("/api/products");
+  products = body.rows;
+  // Populate filter dropdowns
+  const opts = (key) => ["<option value=''>(all)</option>"].concat(
+    [...new Set(products.map(p => p[key]).filter(Boolean))].sort().map(v => `<option>${v}</option>`)
+  ).join("");
+  $("f-chemistry").innerHTML   = opts("chemistry");
+  $("f-form_factor").innerHTML = opts("form_factor");
+  renderProducts();
 }
 
-function reset() {
-  for (const f of FILTERS) [...$("f-"+f).options].forEach(o => o.selected = false);
-  $("f-min_capacity").value = "";
-  render(allRows);
+function renderProducts() {
+  const chem = $("f-chemistry").value;
+  const ff   = $("f-form_factor").value;
+  const q    = $("f-search").value.trim().toLowerCase();
+  const list = products.filter(p =>
+    (!chem || p.chemistry === chem) &&
+    (!ff   || p.form_factor === ff) &&
+    (!q    || (p.name + " " + (p.manufacturer || "")).toLowerCase().includes(q))
+  );
+  $("products").innerHTML = list.map(p => `
+    <div class="product">
+      <article>
+        <h4>${escapeHTML(p.name)}</h4>
+        <div class="meta">${escapeHTML(p.manufacturer || "")} · ${escapeHTML(p.chemistry)} · ${escapeHTML(p.form_factor || "")}</div>
+        <p>${escapeHTML(p.description || "")}</p>
+        <div><span class="price">${fmt(p.price_cents)}</span></div>
+        <div class="stock">${p.stock > 0 ? p.stock + " in stock" : "Out of stock"}</div>
+        <div class="row">
+          <input type="number" min="1" max="${p.stock}" value="1" id="qty-${p.id}" ${p.stock === 0 ? "disabled" : ""}>
+          <button onclick="addToCart(${p.id})" ${p.stock === 0 ? "disabled" : ""}>Add to cart</button>
+        </div>
+      </article>
+    </div>
+  `).join("");
 }
 
-function render(rows) {
-  $("grid").innerHTML =
-    "<thead><tr>" + COLS.map(c => `<th>${c}</th>`).join("") + "<th></th></tr></thead>" +
-    "<tbody>" + rows.map(r =>
-      "<tr>" + COLS.map(c => {
-        let v = r[c];
-        if (c === "rechargeable") v = v ? "yes" : "no";
-        return `<td>${v ?? ""}</td>`;
-      }).join("") +
-      `<td><button class="secondary outline" onclick="del(${r.id})">×</button></td></tr>`
-    ).join("") + "</tbody>";
-  $("status").textContent = rows.length + " rows";
+function addToCart(id) {
+  const p = products.find(x => x.id === id);
+  const qty = Math.max(1, +$("qty-" + id).value || 1);
+  const have = cart[id] || 0;
+  const total = have + qty;
+  if (total > p.stock) {
+    toast(`Only ${p.stock} in stock (you already have ${have} in cart)`);
+    return;
+  }
+  cart[id] = total;
+  saveCart();
+  toast(`Added ${qty} × ${p.name}`);
 }
 
-async function del(id) {
-  if (!confirm("Delete id " + id + "?")) return;
-  await api("/api/batteries/"+id, {method:"DELETE"});
-  loadAll();
+["f-chemistry", "f-form_factor", "f-search"].forEach(id =>
+  document.addEventListener("DOMContentLoaded", () => $(id).addEventListener("input", renderProducts))
+);
+
+// ---------- cart ----------
+function renderCart() {
+  const ids = Object.keys(cart).map(Number);
+  if (ids.length === 0) {
+    $("cart-table").innerHTML = "<tbody><tr><td>Your cart is empty.</td></tr></tbody>";
+    $("cart-total").textContent = "0.00";
+    return;
+  }
+  let total = 0;
+  const rows = ids.map(id => {
+    const p = products.find(x => x.id === id);
+    if (!p) return "";
+    const qty = cart[id];
+    const line = p.price_cents * qty;
+    total += line;
+    return `<tr>
+      <td>${escapeHTML(p.name)}</td>
+      <td>${fmt(p.price_cents)}</td>
+      <td>
+        <input type="number" min="1" max="${p.stock}" value="${qty}" style="width:5rem"
+               onchange="changeQty(${id}, this.value)">
+      </td>
+      <td>${fmt(line)}</td>
+      <td><button class="secondary outline" onclick="removeItem(${id})">×</button></td>
+    </tr>`;
+  }).join("");
+  $("cart-table").innerHTML =
+    "<thead><tr><th>Item</th><th>Price</th><th>Qty</th><th>Subtotal</th><th></th></tr></thead>" +
+    "<tbody>" + rows + "</tbody>";
+  $("cart-total").textContent = (total / 100).toFixed(2);
 }
 
-async function add() {
-  const num = id => { const v = $(id).value.trim(); return v === "" ? null : +v; };
-  const str = id => $(id).value.trim() || null;
-  const data = {
-    name: str("a-name"), manufacturer: str("a-manufacturer"),
-    chemistry: str("a-chemistry"), form_factor: str("a-form_factor"),
-    capacity_mah: num("a-capacity_mah"), voltage_v: num("a-voltage_v"),
-    weight_g: num("a-weight_g"), year_introduced: num("a-year_introduced"),
-    notes: str("a-notes"), rechargeable: $("a-rechargeable").checked,
-  };
-  if (!data.name || !data.chemistry) { $("status").textContent = "name and chemistry required"; return; }
-  await api("/api/batteries", {
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify(data),
+function changeQty(id, v) {
+  const p = products.find(x => x.id === id);
+  let q = Math.max(1, +v || 1);
+  if (q > p.stock) { q = p.stock; toast(`Max stock for ${p.name} is ${p.stock}`); }
+  cart[id] = q;
+  saveCart();
+  renderCart();
+}
+
+function removeItem(id) {
+  delete cart[id];
+  saveCart();
+  renderCart();
+}
+
+function emptyCart() {
+  if (!confirm("Empty the cart?")) return;
+  cart = {};
+  saveCart();
+  renderCart();
+}
+
+async function placeOrder() {
+  const name    = $("c-name").value.trim();
+  const email   = $("c-email").value.trim();
+  const address = $("c-address").value.trim();
+  const notes   = $("c-notes").value.trim();
+  if (!name || !email || !address) {
+    $("checkout-status").textContent = "Name, email, and address are required.";
+    return;
+  }
+  const items = Object.entries(cart).map(([pid, qty]) => ({product_id: +pid, quantity: qty}));
+  if (items.length === 0) {
+    $("checkout-status").textContent = "Your cart is empty.";
+    return;
+  }
+  $("place-btn").disabled = true;
+  $("checkout-status").textContent = "Placing order...";
+  const {ok, body} = await api("/api/orders", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({customer_name: name, customer_email: email,
+                          customer_address: address, notes, items}),
   });
-  document.querySelectorAll('input[id^="a-"]').forEach(el => {
-    if (el.type === "checkbox") el.checked = false; else el.value = "";
+  $("place-btn").disabled = false;
+  if (!ok) {
+    $("checkout-status").textContent = "Error: " + (body.error || "could not place order");
+    return;
+  }
+  $("checkout-status").textContent = `✅ Order #${body.id} placed! We'll be in touch.`;
+  cart = {};
+  saveCart();
+  renderCart();
+  ["c-name", "c-email", "c-address", "c-notes"].forEach(id => $(id).value = "");
+  loadProducts(); // refresh stock
+}
+
+// ---------- admin ----------
+const STATUSES = ["pending", "processing", "shipped", "delivered", "cancelled"];
+
+async function loadOrders() {
+  const {body} = await api("/api/orders");
+  const rows = body.rows;
+  if (rows.length === 0) {
+    $("orders-table").innerHTML = "<tbody><tr><td>No orders yet.</td></tr></tbody>";
+    return;
+  }
+  $("orders-table").innerHTML =
+    `<thead><tr>
+       <th>#</th><th>Date</th><th>Customer</th><th>Email</th>
+       <th>Total</th><th>Status</th><th>Actions</th>
+     </tr></thead>
+     <tbody>` +
+    rows.map(o => `
+      <tr onclick="toggleOrderDetail(${o.id}, event)" style="cursor:pointer">
+        <td>${o.id}</td>
+        <td>${escapeHTML(o.created_at)}</td>
+        <td>${escapeHTML(o.customer_name)}</td>
+        <td>${escapeHTML(o.customer_email)}</td>
+        <td>${fmt(o.total_cents)}</td>
+        <td><span class="badge b-${o.status}">${o.status}</span></td>
+        <td onclick="event.stopPropagation()">
+          <select onchange="setStatus(${o.id}, this.value)">
+            ${STATUSES.map(s => `<option value="${s}" ${s === o.status ? "selected" : ""}>${s}</option>`).join("")}
+          </select>
+          <button class="secondary outline" onclick="deleteOrder(${o.id})">×</button>
+        </td>
+      </tr>
+      <tr id="detail-${o.id}" class="order-detail hidden"><td colspan="7"></td></tr>
+    `).join("") +
+    "</tbody>";
+}
+
+async function toggleOrderDetail(id, ev) {
+  const tr = $("detail-" + id);
+  if (!tr.classList.contains("hidden")) {
+    tr.classList.add("hidden");
+    return;
+  }
+  const {body} = await api("/api/orders/" + id);
+  const cell = tr.querySelector("td");
+  cell.innerHTML = `
+    <strong>Address:</strong> ${escapeHTML(body.customer_address)}<br>
+    ${body.notes ? `<strong>Notes:</strong> ${escapeHTML(body.notes)}<br>` : ""}
+    <table style="margin-top:.5rem">
+      <thead><tr><th>Product</th><th>Qty</th><th>Unit</th><th>Subtotal</th></tr></thead>
+      <tbody>
+        ${body.items.map(it => `<tr>
+          <td>${escapeHTML(it.product_name)}</td>
+          <td>${it.quantity}</td>
+          <td>${fmt(it.unit_price_cents)}</td>
+          <td>${fmt(it.unit_price_cents * it.quantity)}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+  `;
+  tr.classList.remove("hidden");
+}
+
+async function setStatus(id, status) {
+  const {ok, body} = await api("/api/orders/" + id, {
+    method: "PATCH",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({status}),
   });
-  loadAll();
+  if (!ok) toast("Error: " + (body.error || "could not update"));
+  else { toast(`Order #${id} → ${status}`); loadOrders(); }
 }
 
-// Stats opens in the dialog so it's impossible to miss
-async function showStats() {
-  const {rows} = await api("/api/stats");
-  $("stats-grid").innerHTML =
-    "<thead><tr><th>Chemistry</th><th>n</th><th>avg mAh</th><th>avg V</th></tr></thead>" +
-    "<tbody>" + rows.map(r =>
-      `<tr><td>${r.chemistry}</td><td>${r.count}</td><td>${r.avg_capacity_mah ?? ""}</td><td>${r.avg_voltage_v ?? ""}</td></tr>`
-    ).join("") + "</tbody>";
-  $("stats-dlg").showModal();
+async function deleteOrder(id) {
+  if (!confirm("Delete order #" + id + "?")) return;
+  await api("/api/orders/" + id, {method: "DELETE"});
+  loadOrders();
 }
 
-loadAll();
+// ---------- helpers ----------
+function escapeHTML(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+// ---------- init ----------
+updateCartCount();
+loadProducts();
 </script>
 </body>
 </html>

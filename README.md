@@ -1,20 +1,25 @@
-# Battery Lab
+# Battery Shop
 
-A 2-hour Python teaching lab. A **web browser** talks to a **Python HTTP
-server** that reads and writes a **SQLite** database of batteries.
+A small **battery shop** web app. A browser talks to a Python HTTP
+server that reads and writes a SQLite database of products and orders.
+Customers browse, add to cart, and place orders (no payment — orders
+are recorded for the shop owner to fulfil). A separate **Admin** tab
+lets the shop owner see every order, change its status, and delete it.
 
 Standard library only — **no `pip install` needed**.
 
 ```
 +------------------+      HTTP       +------------------+      SQL      +-------------+
-|  Browser         |  <----------->  |  server.py       |  <--------->  | batteries.db|
+|  Browser         |  <----------->  |  server.py       |  <--------->  |  shop.db    |
 |  (index.html +   |    GET / POST   |  (http.server)   |               |  (SQLite)   |
-|   fetch + JS)    |    DELETE       |                  |               +-------------+
+|   fetch + JS)    |    PATCH/DELETE |                  |               +-------------+
 +------------------+                 +------------------+
 ```
 
-Teachers: see [`TEACHER.md`](TEACHER.md) for the lesson plan and
-exercises.
+Three views in the UI: **Shop**, **Cart**, **Admin**. The cart lives in
+`localStorage` so it survives a refresh.
+
+Teachers/devs: see [`TEACHER.md`](TEACHER.md) for a full walk-through.
 
 ---
 
@@ -47,8 +52,8 @@ defaults. Verify with `git --version`.
 ### 3. Clone and run
 
 ```
-git clone https://github.com/hpfrei/patrick_battery_lesson.git
-cd patrick_battery_lesson
+git clone <your-repo-url>
+cd <repo-folder>
 run.bat
 ```
 
@@ -80,8 +85,8 @@ python3 -c "import http.server, sqlite3; print('ok')"
 Clone and run:
 
 ```bash
-git clone https://github.com/hpfrei/patrick_battery_lesson.git
-cd patrick_battery_lesson
+git clone <your-repo-url>
+cd <repo-folder>
 ./run.sh
 ```
 
@@ -95,11 +100,24 @@ A browser tab opens automatically.
 
 ## What you can do in the browser
 
-- **Search** by chemistry, form factor, and minimum capacity (mAh).
-- **Show all** — list every battery.
-- **Stats** — counts and averages grouped by chemistry.
-- **Add a battery** — fill the form and click Add.
-- **Delete** — every row has a delete button.
+### Shop tab
+- Browse the catalogue: every product shows price, stock, chemistry,
+  form factor, and a short description.
+- Filter by **chemistry**, **form factor**, or free-text **search**.
+- Set a quantity, click **Add to cart**.
+
+### Cart tab
+- See line items, change quantities, remove items, empty the cart.
+- Fill in name, email, address, and an optional note, then click
+  **Place order**. No payment — the order is just recorded.
+
+### Admin tab
+- See every order, newest first. Each row shows the customer, total,
+  and a colour-coded status badge.
+- Click a row to expand it and see the line items, address, and notes.
+- Change the status from the dropdown:
+  `pending → processing → shipped → delivered`, or `cancelled`.
+- Delete an order (cascades to its line items).
 
 The server log (in the terminal) shows every request as it happens.
 
@@ -110,14 +128,30 @@ The server log (in the terminal) shows every request as it happens.
 The server speaks plain HTTP, so any HTTP client works:
 
 ```bash
-curl http://127.0.0.1:5050/api/stats
-curl "http://127.0.0.1:5050/api/batteries?chemistry=Li-ion&min_capacity=3000"
+# List products
+curl http://127.0.0.1:5050/api/products
 
-curl -X POST http://127.0.0.1:5050/api/batteries \
+# Place an order
+curl -X POST http://127.0.0.1:5050/api/orders \
      -H "Content-Type: application/json" \
-     -d '{"name":"Test","chemistry":"NiMH","capacity_mah":1500,"rechargeable":true}'
+     -d '{
+           "customer_name":    "Alice",
+           "customer_email":   "alice@example.com",
+           "customer_address": "1 Battery Lane",
+           "notes":            "leave by the door",
+           "items": [
+             {"product_id": 1, "quantity": 2},
+             {"product_id": 5, "quantity": 1}
+           ]
+         }'
 
-curl -X DELETE http://127.0.0.1:5050/api/batteries/21
+# Admin: list orders, fetch one, update status, delete
+curl http://127.0.0.1:5050/api/orders
+curl http://127.0.0.1:5050/api/orders/1
+curl -X PATCH  http://127.0.0.1:5050/api/orders/1 \
+     -H "Content-Type: application/json" \
+     -d '{"status":"shipped"}'
+curl -X DELETE http://127.0.0.1:5050/api/orders/1
 ```
 
 See `TEACHER.md` for the full endpoint reference.
@@ -133,17 +167,19 @@ See `TEACHER.md` for the full endpoint reference.
 | Browser shows "Unable to connect"             | Server isn't running yet — start `run.bat` / `./run.sh`          |
 | `Errno 98` / `WinError 10048 ... only one usage` | Port 5050 is busy — close the other process or change `PORT` in `server.py` |
 | Edits to `index.html` don't appear            | Browser cache — Ctrl+F5 to hard-reload                           |
+| "Out of stock" but you want to test again     | Stop the server, delete `shop.db`, start again — it reseeds      |
+| Cart shows old items after a code change      | The cart lives in `localStorage` — open DevTools → Application → Storage → Clear |
 
 ---
 
 ## Files
 
 ```
-seed_db.py    Creates batteries.db and inserts 20 sample rows
-server.py     HTTP server on 127.0.0.1:5050
-index.html    Web UI (HTML + CSS + vanilla JS, single file)
+seed_db.py    Creates shop.db with 12 sample products + empty orders/order_items
+server.py     HTTP server on 127.0.0.1:5050 (catalogue + orders + admin API)
+index.html    Web UI with Shop / Cart / Admin tabs (HTML + CSS + vanilla JS)
 run.bat       Windows launcher (double-clickable)
 run.sh        Linux launcher
-TEACHER.md    2-hour lesson plan with exercises
+TEACHER.md    Walkthrough, architecture notes, exercises
 README.md     You are here
 ```

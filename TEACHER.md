@@ -1,31 +1,21 @@
-# Battery Lab — Teacher's Guide (2 hours)
+# Battery Shop — Walkthrough & Teacher's Guide (2 hours)
 
-A hands-on lab where students see a small but complete **web** stack: a
-browser talks to a Python **HTTP server** that reads and writes a
-**SQLite** database of batteries.
+A small but complete **web shop** stack: a browser talks to a Python
+HTTP server that reads and writes a SQLite database of battery products
+and customer orders. Customers add to a cart and place orders (no
+payment). A separate admin tab lets the shop owner manage those orders.
 
 Everything is **standard library only**. No `pip install`, no Flask, no
 build tools. Tested with Python 3.10+.
 
 ---
 
-## Original brief (what was asked for)
+## Original brief
 
-> I want a solution for a teacher to hand out to students for a 2-hour
-> session using:
->
-> - Python
-> - SQLite
-> - client/server (web server / web browser)
->
-> Topic: **batteries**. Stage the DB with data to play with.
->
-> GUI with interactivity.
->
-> And a script for the teacher.
->
-> Note: students must `git clone` and it must run directly on their
-> Windows PCs.
+> Battery shop, no payments — only orders. Orders in a table too. One
+> admin tab for the shop admin to manage orders. Same stack as before:
+> Python stdlib HTTP server, SQLite, single-file HTML. Must work on
+> Windows after `git clone`.
 
 This repo is the deliverable. It also runs on Linux (see `README.md`).
 
@@ -55,7 +45,7 @@ cd <repo-folder>
 ```
 
 A browser tab opens automatically at **http://127.0.0.1:5050/**.
-The first run creates `batteries.db` and loads 20 sample rows.
+The first run creates `shop.db` and loads 12 sample products.
 
 ---
 
@@ -63,22 +53,50 @@ The first run creates `batteries.db` and loads 20 sample rows.
 
 ```
    +------------------+      HTTP       +------------------+      SQL      +-------------+
-   |  Browser         |  <----------->  |  server.py       |  <--------->  | batteries.db|
+   |  Browser         |  <----------->  |  server.py       |  <--------->  |  shop.db    |
    |  (index.html +   |    GET / POST   |  (http.server)   |               |  (SQLite)   |
-   |   fetch + JS)    |    DELETE       |                  |               +-------------+
+   |   fetch + JS)    |    PATCH/DELETE |                  |               +-------------+
    +------------------+                 +------------------+
 ```
 
 Three layers, three responsibilities:
 
-- **Database** — knows facts. Doesn't know about HTTP.
-- **Server** — knows the rules. Translates URLs and JSON bodies into SQL,
-  returns JSON or HTML. The only process that ever opens the DB file.
-- **Client** — the *browser*. Renders HTML, accepts input, fires
-  `fetch()` calls. Could be replaced by `curl`, by a phone app, by
-  another script — the server doesn't care.
+- **Database** — knows facts (products, orders, line items). Doesn't
+  know about HTTP.
+- **Server** — knows the rules. Translates URLs and JSON bodies into
+  SQL, returns JSON or HTML. The only process that ever opens the DB
+  file. Owns the **truth** about price and stock — it never trusts
+  numbers from the client.
+- **Client** — the browser. Renders HTML, accepts input, fires
+  `fetch()` calls. The cart is just a JS object kept in `localStorage`;
+  it doesn't become "real" until the customer clicks **Place order**.
 
 This is the same architecture as Twitter, GitHub, Gmail — just smaller.
+
+### Three-table data model
+
+```
+products                  orders                       order_items
+--------                  ------                       -----------
+id                        id                           id
+name                      customer_name                order_id     ──┐ FK → orders.id (CASCADE)
+manufacturer              customer_email               product_id   ──┐ FK → products.id (SET NULL)
+chemistry                 customer_address             product_name   ┘  (snapshot — survives delete)
+form_factor               notes                        unit_price_cents  (snapshot)
+capacity_mah              total_cents                  quantity
+voltage_v                 status (pending/.../cancelled)
+price_cents               created_at
+stock
+description
+```
+
+Two ideas worth pausing on:
+
+1. **Money in cents (INTEGER), not floats.** Avoids the classic
+   `0.1 + 0.2 != 0.3` rounding bugs.
+2. **Snapshot price + name on each line item.** When an admin edits a
+   product price tomorrow, yesterday's orders still show what the
+   customer actually paid. Real shops always do this.
 
 ---
 
@@ -86,48 +104,62 @@ This is the same architecture as Twitter, GitHub, Gmail — just smaller.
 
 ### 0:00 – 0:10 — Welcome & demo
 - Run `run.bat` / `./run.sh` on the projector.
-- Browser opens. Type `Li-ion` in Chemistry → Search. Click **Stats**.
+- Browser opens. Filter by `Li-ion`. Add an item. Switch to the **Cart**
+  tab. Fill in name/email/address. Click **Place order**.
+- Switch to **Admin**. The new order shows up. Click the row → line
+  items expand. Change status to `shipped`.
 - Watch the server console log each request:
-  `GET /api/batteries?chemistry=Li-ion HTTP/1.1 200 -`
+  `POST /api/orders HTTP/1.1 201 -`, `PATCH /api/orders/1 HTTP/1.1 200 -`.
 
 ### 0:10 – 0:20 — Whiteboard the architecture
-- The diagram above.
-- Ask: *"What happens between clicking Search and seeing rows?"* Walk
-  the signal path: button → JS `fetch` → HTTP GET → SQL → SQLite → rows
-  → JSON → `<table>`.
+- Draw the diagram and the three tables above.
+- Ask: *"What happens between clicking **Place order** and seeing the
+  order in Admin?"* Walk the signal path:
+  button → `placeOrder()` → `fetch POST /api/orders` →
+  `create_order()` → SQL `INSERT INTO orders`, `INSERT INTO order_items`,
+  `UPDATE products SET stock = stock - ?` → JSON `{"id": 1}` → toast.
 
 ### 0:20 – 0:35 — Read the code together (5 min/file)
-1. **`seed_db.py`** — schema + sample rows. Point out
-   `INTEGER PRIMARY KEY AUTOINCREMENT` and `executemany`.
-2. **`server.py`** — start at `Handler.do_GET`. Show how a URL maps to a
-   function. Then `do_POST` and `do_DELETE`. Highlight the
+1. **`seed_db.py`** — three `CREATE TABLE`s, `FOREIGN KEY ... CASCADE`,
+   `executemany` for the sample products. Note: re-running drops and
+   recreates everything.
+2. **`server.py`** — start at `Handler.do_POST`. Walk through
+   `create_order()`: validate, look up the *real* prices, check stock,
+   insert order + items, decrement stock — all inside a single
+   transaction (the `with connect()` block). Highlight the
    **parameterized queries** (`?` placeholders) and ask *why* — they
-   prevent SQL injection.
-3. **`index.html`** — start at the `loadRows` function. Show how it
-   builds a query string, calls `fetch`, parses JSON, builds HTML. The
-   buttons in the page just call these JS functions.
+   prevent SQL injection. Then `do_PATCH` (status update,
+   server-side allowlist) and `do_DELETE` (cascade).
+3. **`index.html`** — three `<section>`s, one shown at a time. Show
+   `loadProducts()`, `addToCart()` (just mutates a JS object,
+   `localStorage.setItem`), `placeOrder()` (the only client→server
+   write), and the admin `loadOrders()` + `setStatus()` pair.
 
 ### 0:35 – 0:50 — Talk to the server *without* the browser
 Open a terminal alongside the running server. The server is just HTTP,
 so any HTTP client works:
 
 ```bash
-# Windows or Linux — curl is built into modern Windows 10/11
-curl http://127.0.0.1:5050/api/stats
-curl "http://127.0.0.1:5050/api/batteries?chemistry=Li-ion&min_capacity=3000"
+# Browse the catalogue
+curl http://127.0.0.1:5050/api/products
 
-curl -X POST http://127.0.0.1:5050/api/batteries ^
+# Place an order with curl (no UI involved)
+curl -X POST http://127.0.0.1:5050/api/orders ^
      -H "Content-Type: application/json" ^
-     -d "{\"name\":\"Test\",\"chemistry\":\"NiMH\",\"capacity_mah\":1500,\"rechargeable\":true}"
+     -d "{\"customer_name\":\"Bob\",\"customer_email\":\"b@x.com\",\"customer_address\":\"42 Wire St\",\"items\":[{\"product_id\":1,\"quantity\":3}]}"
 
-curl -X DELETE http://127.0.0.1:5050/api/batteries/21
+# Admin: list, inspect, update status, delete
+curl http://127.0.0.1:5050/api/orders
+curl http://127.0.0.1:5050/api/orders/1
+curl -X PATCH  http://127.0.0.1:5050/api/orders/1 -H "Content-Type: application/json" -d "{\"status\":\"shipped\"}"
+curl -X DELETE http://127.0.0.1:5050/api/orders/1
 ```
 
 Or from Python:
 
 ```python
 import urllib.request, json
-print(json.loads(urllib.request.urlopen("http://127.0.0.1:5050/api/stats").read()))
+print(json.loads(urllib.request.urlopen("http://127.0.0.1:5050/api/products").read()))
 ```
 
 Drives the point home: **the browser is just one client.** The server
@@ -137,46 +169,60 @@ speaks HTTP, and that's a public contract.
 
 ### 1:00 – 1:35 — Exercise A (pick one — pair students up)
 
-**A1. Add a `PUT /api/batteries/<id>` endpoint to update a row.**
-- In `server.py`, add `do_PUT`. Use `UPDATE batteries SET ... WHERE id = ?`.
-- In `index.html`, add an "Edit" button per row that opens a small form
-  pre-filled with the row's values, then `fetch(..., {method: "PUT"})`.
+**A1. Add a product-management form to the Admin tab.**
+- New endpoints: `POST /api/products`, `PATCH /api/products/<id>`,
+  `DELETE /api/products/<id>`.
+- New form in the admin section to add or edit a product.
+- *Discussion:* who should be allowed to call these? Introduces the
+  idea of **authentication** without you having to build it.
 
-**A2. Add a new column `country_of_origin TEXT`.**
-- Edit the schema in `seed_db.py`, delete `batteries.db`, restart.
-- Add the column to `COLUMNS` in `server.py` and to the `COLS` array
-  and add-form in `index.html`.
-- *Discussion:* in a real system you can't just delete the data —
-  introduces the idea of **migrations**.
+**A2. Add an "order confirmation" view.**
+- After placing an order, redirect the user to a small page that shows
+  `GET /api/orders/<id>` (the response already includes line items).
+- *Twist:* exposing every order by id is a problem. Add a random
+  `tracking_token` column and require it as `?token=...`. Talk about
+  why sequential ids leak information.
 
-**A3. Add a sort dropdown (capacity / voltage / year).**
-- Add `?sort_by=capacity_mah` (and `&sort_dir=desc`) to the list endpoint.
-- **Whitelist** allowed values on the server — never paste user input
-  directly into SQL. Why? **SQL injection.**
+**A3. Add a search/filter to the Admin tab.**
+- Filter orders by status and by customer email substring.
+- Server: `GET /api/orders?status=pending&email=...`
+- **Whitelist** allowed status values on the server — never paste user
+  input directly into SQL. Why? **SQL injection.**
+
+**A4. "My orders" lookup.**
+- A new public tab: enter your email, see your orders.
+- Server: `GET /api/orders?email=...` (locked to that email only).
+- Discuss why email alone isn't authentication, and how a real shop
+  would email a magic link instead.
 
 ### 1:35 – 1:50 — Exercise B: many clients, one server
-- One student adds a battery from their browser.
-- A neighbour clicks **Show all** in their browser tab.
+- One student places an order from their browser.
+- A neighbour clicks **↻ Refresh** in the Admin tab.
 - Discuss: the server is the single source of truth.
-- Optional, on the same machine: open a second tab, watch the server log
-  show two distinct sources hitting the same endpoint.
-- Optional, networked: change `HOST = "0.0.0.0"` in `server.py` and have
-  a neighbour visit `http://<your-IP>:5050/`. **Stop and discuss**: in
-  the real world this is where you'd add **HTTPS** and **authentication**
-  before exposing a port.
+- Optional, on the same machine: open two browser windows and watch
+  the server log show two distinct sources hitting the same endpoint.
+- Optional, networked: change `HOST = "0.0.0.0"` in `server.py` and
+  have a neighbour visit `http://<your-IP>:5050/`. **Stop and discuss**:
+  in the real world this is where you'd add **HTTPS** and
+  **authentication** before exposing a port — and certainly before
+  exposing the **Admin** tab.
 
 ### 1:50 – 2:00 — Wrap-up & Q&A
 Talking points to close:
-- We used `?` placeholders → safe from SQL injection. Why string-concat
-  would be unsafe.
+- We used `?` placeholders → safe from SQL injection.
+- The server **never trusts the client's price**. The browser sends
+  `{product_id, quantity}` only; the server looks up the real price.
+  This is how every real shop avoids people editing JS to pay $0.01.
+- Money is stored in **integer cents**, not floats.
+- Each order *snapshots* its line items (name + price). Why? Because
+  product prices change and orders need to remain a faithful record.
 - HTTP is just a text protocol on top of TCP — no magic. Verbs (GET,
-  POST, DELETE), URLs, status codes, headers, optional body. That's it.
+  POST, PATCH, DELETE), URLs, status codes, headers, optional body.
+- The Admin tab in this lab has **no authentication**. In production
+  it'd live behind a login (and HTTPS, and ideally a different domain
+  or path) — same architecture, just more layers.
 - Frameworks like Flask or FastAPI give you routing, validation, and
   templating — same architecture, less hand-rolled boilerplate.
-- One thread per request is fine for a class; production servers add
-  thread pools, async I/O, reverse proxies (nginx), caching, and
-  database connection pools.
-- Where would *you* add login? Where would caching help?
 
 ---
 
@@ -188,22 +234,24 @@ Talking points to close:
 | `python3: command not found` (Linux) | Python 3 not installed | `sudo apt install python3` (or your distro's equivalent) |
 | Browser shows "Unable to connect" | Server isn't running | Start `run.bat` / `./run.sh`, watch its console for the URL |
 | Server: `[Errno 98]` / `WinError 10048` | Another process is on port 5050 | Close it, or change `PORT` in `server.py` |
-| Page loads but table is empty | Browser cached an old page | Hard refresh: Ctrl+F5 |
-| Edits to `index.html` don't show up | Same — browser cache | Ctrl+F5, or open DevTools → Network → "Disable cache" |
-| Stats look wrong after edits | The server is the source of truth — click **Show all** | Or reload the page |
+| Cart still has old items after a code change | Cart lives in `localStorage` | DevTools → Application → Storage → Clear, or click **Empty cart** |
+| "Out of stock" right after seeding | Stock was decremented by an earlier test | Stop server, delete `shop.db`, start again — it reseeds |
+| Edits to `index.html` don't show up | Browser cache | Ctrl+F5, or open DevTools → Network → "Disable cache" |
+| Admin shows old orders after a status change | The page only refreshes when you click **↻ Refresh** | Click it, or call `loadOrders()` from the JS console |
 
 ---
 
 ## 5. Cheat sheet — HTTP API
 
-| Method | Path                       | Body                       | Returns                        |
-|--------|----------------------------|----------------------------|--------------------------------|
-| GET    | `/`                        | —                          | `index.html` (the web UI)      |
-| GET    | `/api/batteries`           | —                          | `{"rows": [...]}`              |
-| GET    | `/api/batteries?chemistry=Li-ion&min_capacity=3000` | — | filtered `{"rows": [...]}` |
-| POST   | `/api/batteries`           | `{"name":..., "chemistry":..., ...}` | `201 {"id": 21}`     |
-| DELETE | `/api/batteries/21`        | —                          | `{"deleted": 1}`               |
-| GET    | `/api/stats`               | —                          | `{"rows": [...]}` (by chemistry) |
+| Method | Path                  | Body                                                          | Returns                       |
+|--------|-----------------------|---------------------------------------------------------------|-------------------------------|
+| GET    | `/`                   | —                                                             | `index.html` (the web UI)     |
+| GET    | `/api/products`       | —                                                             | `{"rows": [...]}` (catalogue) |
+| POST   | `/api/orders`         | `{customer_name, customer_email, customer_address, notes?, items:[{product_id, quantity}]}` | `201 {"id": 1}` |
+| GET    | `/api/orders`         | —                                                             | `{"rows": [...]}` (newest first) |
+| GET    | `/api/orders/<id>`    | —                                                             | one order with `items:[...]`  |
+| PATCH  | `/api/orders/<id>`    | `{"status":"pending|processing|shipped|delivered|cancelled"}` | `{"updated": 1}`              |
+| DELETE | `/api/orders/<id>`    | —                                                             | `{"deleted": 1}` (cascades to items) |
 
 Errors come back as `4xx` with `{"error": "..."}` JSON.
 
@@ -211,12 +259,12 @@ Errors come back as `4xx` with `{"error": "..."}` JSON.
 
 ## 6. Files in this lab
 
-- `seed_db.py`  — creates `batteries.db` and inserts 20 sample rows.
+- `seed_db.py`  — creates `shop.db`: products + orders + order_items.
 - `server.py`   — HTTP server on `127.0.0.1:5050`.
-- `index.html`  — the web UI (HTML + CSS + vanilla JS, single file).
+- `index.html`  — the web UI with Shop / Cart / Admin tabs (single file).
 - `run.bat`, `run.sh` — start the server (and open the browser).
 - `README.md`   — student-facing install & run instructions.
 - `TEACHER.md`  — this file.
 
-Good luck — and may your students leave understanding that "web app" is
-not magic, just two programs that agreed on **HTTP**.
+Good luck — and may your students leave understanding that "web shop"
+is not magic, just two programs that agreed on **HTTP**.
