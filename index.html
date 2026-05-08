@@ -3,209 +3,159 @@
 <head>
 <meta charset="utf-8">
 <title>Battery Browser</title>
+<!-- Pico CSS: zero-config styling for plain HTML -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 <style>
-  :root { --bg:#fafafa; --line:#ddd; --pri:#2563eb; --bad:#dc2626; --muted:#6b7280; }
-  * { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: var(--bg); color: #111; }
-  header { background: #1f2937; color: #fff; padding: .8rem 1rem; }
-  header h1 { margin: 0; font-size: 1.1rem; }
-  main { padding: 1rem; max-width: 1150px; margin: 0 auto; }
-  section { background: #fff; padding: 1rem; border: 1px solid var(--line); border-radius: 6px; margin-top: 1rem; }
-  section h2 { margin: 0 0 .6rem; font-size: 1rem; }
-  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: flex-end; }
-  label { display: flex; flex-direction: column; gap: 2px; font-size: .8rem; color: var(--muted); }
-  input, button { padding: .35rem .55rem; font: inherit; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
-  button { cursor: pointer; }
-  button.primary { background: var(--pri); color: #fff; border-color: var(--pri); }
-  button.danger  { background: var(--bad); color: #fff; border-color: var(--bad); padding: .15rem .4rem; font-size: .8rem; }
-  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-  th, td { padding: .35rem .5rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-  th { background: #f3f4f6; position: sticky; top: 0; }
-  tr:hover td { background: #f9fafb; }
-  #status { font-size: .85rem; color: var(--muted); margin-top: .6rem; min-height: 1.1em; }
-  #status.err { color: var(--bad); }
-  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .5rem; max-width: 800px; }
-  .grid label.wide { grid-column: 1 / -1; }
-  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  main { padding: 1rem; max-width: 1200px; }
+  .filters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+  @media (max-width: 800px) { .filters { grid-template-columns: 1fr 1fr; } }
+  select[multiple] { min-height: 7rem; }
+  table { font-size: .85rem; }
+  td button { padding: .1rem .4rem; font-size: .8rem; }
 </style>
 </head>
 <body>
-<header><h1>🔋 Battery Browser</h1></header>
 <main>
+  <h1>🔋 Battery Browser</h1>
 
-  <section>
-    <h2>Search</h2>
-    <div class="row">
-      <label>Chemistry      <input id="q-chem"  placeholder="Li-ion"></label>
-      <label>Form factor    <input id="q-form"  placeholder="18650"></label>
-      <label>Min mAh        <input id="q-mc"    type="number" min="0" placeholder="3000"></label>
-      <button class="primary" onclick="loadRows()">Search</button>
-      <button onclick="clearSearch()">Show all</button>
-      <button onclick="loadStats()">Stats</button>
+  <article>
+    <div class="filters">
+      <label>Chemistry      <select id="f-chemistry"   multiple></select></label>
+      <label>Form factor    <select id="f-form_factor" multiple></select></label>
+      <label>Manufacturer   <select id="f-manufacturer" multiple></select></label>
+      <label>Min mAh        <input  id="f-min_capacity" type="number" min="0"></label>
     </div>
-    <div id="status"></div>
-  </section>
-
-  <section>
-    <h2>Batteries</h2>
-    <table>
-      <thead><tr id="head"></tr></thead>
-      <tbody id="rows"></tbody>
-    </table>
-  </section>
-
-  <section>
-    <h2>Add a battery</h2>
-    <div class="grid">
-      <label>Name *           <input id="a-name"></label>
-      <label>Manufacturer     <input id="a-man"></label>
-      <label>Chemistry *      <input id="a-chem"></label>
-      <label>Form factor      <input id="a-form"></label>
-      <label>Capacity (mAh)   <input id="a-mah"   type="number"></label>
-      <label>Voltage (V)      <input id="a-v"     type="number" step="0.01"></label>
-      <label>Weight (g)       <input id="a-g"     type="number" step="0.1"></label>
-      <label>Year introduced  <input id="a-y"     type="number"></label>
-      <label><input id="a-rech" type="checkbox" style="margin-right:6px"> Rechargeable</label>
-      <label class="wide">Notes <input id="a-notes"></label>
+    <div role="group">
+      <button onclick="search()">Search</button>
+      <button class="secondary" onclick="reset()">Show all</button>
+      <button class="contrast"  onclick="showStats()">Stats</button>
     </div>
-    <p style="margin-top:.8rem"><button class="primary" onclick="addBattery()">Add</button></p>
-  </section>
+    <small id="status"></small>
+  </article>
 
-  <section id="stats-section" style="display:none">
-    <h2>Stats by chemistry</h2>
-    <table id="stats-table">
-      <thead><tr><th>Chemistry</th><th>Count</th><th>Avg mAh</th><th>Avg V</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </section>
+  <article><figure><table id="grid"></table></figure></article>
 
+  <article>
+    <h3>Add a battery</h3>
+    <div class="filters">
+      <label>Name *          <input id="a-name"></label>
+      <label>Manufacturer    <input id="a-manufacturer"></label>
+      <label>Chemistry *     <input id="a-chemistry"></label>
+      <label>Form factor     <input id="a-form_factor"></label>
+      <label>Capacity (mAh)  <input id="a-capacity_mah"    type="number"></label>
+      <label>Voltage (V)     <input id="a-voltage_v"       type="number" step="0.01"></label>
+      <label>Weight (g)      <input id="a-weight_g"        type="number" step="0.1"></label>
+      <label>Year            <input id="a-year_introduced" type="number"></label>
+    </div>
+    <label><input id="a-rechargeable" type="checkbox"> Rechargeable</label>
+    <label>Notes <input id="a-notes"></label>
+    <button onclick="add()">Add</button>
+  </article>
+
+  <!-- Stats: native modal, no library needed -->
+  <dialog id="stats-dlg">
+    <article>
+      <header><strong>Stats by chemistry</strong></header>
+      <table id="stats-grid"></table>
+      <footer><form method="dialog"><button>Close</button></form></footer>
+    </article>
+  </dialog>
 </main>
 
 <script>
-const COLS = ["id","name","manufacturer","chemistry","form_factor",
-              "capacity_mah","voltage_v","weight_g","rechargeable","year_introduced","notes"];
+// Columns the API returns; drives table headers and the add form
+const COLS    = ["id","name","manufacturer","chemistry","form_factor",
+                 "capacity_mah","voltage_v","weight_g","rechargeable","year_introduced","notes"];
+const FILTERS = ["chemistry","form_factor","manufacturer"];
 
-function setStatus(msg, isError = false) {
-  const el = document.getElementById("status");
-  el.textContent = msg;
-  el.className = isError ? "err" : "";
+const $   = id => document.getElementById(id);
+const api = (path, opts) => fetch(path, opts).then(r => r.json());
+
+// Cached "all rows" — used to populate the filter dropdowns
+let allRows = [];
+
+// Sorted unique values for one column
+const distinct = f => [...new Set(allRows.map(r => r[f]).filter(Boolean))].sort();
+// Selected option values from a <select multiple>
+const picked   = id => [...$(id).selectedOptions].map(o => o.value);
+
+// Fetch all rows, fill dropdowns, render table
+async function loadAll() {
+  ({rows: allRows} = await api("/api/batteries"));
+  for (const f of FILTERS)
+    $("f-"+f).innerHTML = distinct(f).map(v => `<option>${v}</option>`).join("");
+  render(allRows);
 }
 
-async function api(path, opts = {}) {
-  const res = await fetch(path, opts);
-  let body = null;
-  try { body = await res.json(); } catch {}
-  if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
-  return body;
+// Build ?chemistry=X&chemistry=Y&... and ask server to filter
+async function search() {
+  const p = new URLSearchParams();
+  for (const f of FILTERS) picked("f-"+f).forEach(v => p.append(f, v));
+  if ($("f-min_capacity").value) p.set("min_capacity", $("f-min_capacity").value);
+  const qs = p.toString();
+  const {rows} = await api("/api/batteries" + (qs ? "?"+qs : ""));
+  render(rows);
 }
 
-function escapeHtml(v) {
-  if (v === null || v === undefined) return "";
-  return String(v).replace(/[<>&"]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));
+function reset() {
+  for (const f of FILTERS) [...$("f-"+f).options].forEach(o => o.selected = false);
+  $("f-min_capacity").value = "";
+  render(allRows);
 }
 
-async function loadRows() {
-  const params = new URLSearchParams();
-  const chem = document.getElementById("q-chem").value.trim();
-  const form = document.getElementById("q-form").value.trim();
-  const mc   = document.getElementById("q-mc").value.trim();
-  if (chem) params.set("chemistry",   chem);
-  if (form) params.set("form_factor", form);
-  if (mc)   params.set("min_capacity", mc);
-  const qs = params.toString() ? "?" + params.toString() : "";
-  try {
-    const { rows } = await api("/api/batteries" + qs);
-    renderRows(rows);
-    setStatus(`${rows.length} row(s)`);
-  } catch (e) {
-    setStatus(e.message, true);
-  }
+function render(rows) {
+  $("grid").innerHTML =
+    "<thead><tr>" + COLS.map(c => `<th>${c}</th>`).join("") + "<th></th></tr></thead>" +
+    "<tbody>" + rows.map(r =>
+      "<tr>" + COLS.map(c => {
+        let v = r[c];
+        if (c === "rechargeable") v = v ? "yes" : "no";
+        return `<td>${v ?? ""}</td>`;
+      }).join("") +
+      `<td><button class="secondary outline" onclick="del(${r.id})">×</button></td></tr>`
+    ).join("") + "</tbody>";
+  $("status").textContent = rows.length + " rows";
 }
 
-function clearSearch() {
-  for (const id of ["q-chem","q-form","q-mc"]) document.getElementById(id).value = "";
-  loadRows();
+async function del(id) {
+  if (!confirm("Delete id " + id + "?")) return;
+  await api("/api/batteries/"+id, {method:"DELETE"});
+  loadAll();
 }
 
-function renderRows(rows) {
-  document.getElementById("head").innerHTML =
-    COLS.map(c => `<th>${c}</th>`).join("") + "<th></th>";
-  const tbody = document.getElementById("rows");
-  tbody.innerHTML = rows.map(r => {
-    const cells = COLS.map(c => {
-      let v = r[c];
-      if (c === "rechargeable") v = v ? "yes" : "no";
-      return `<td>${escapeHtml(v)}</td>`;
-    }).join("");
-    return `<tr>${cells}<td><button class="danger" onclick="deleteRow(${r.id})">Delete</button></td></tr>`;
-  }).join("");
-}
-
-async function deleteRow(id) {
-  if (!confirm("Delete battery id " + id + "?")) return;
-  try {
-    await api("/api/batteries/" + id, { method: "DELETE" });
-    setStatus("Deleted id " + id);
-    loadRows();
-  } catch (e) {
-    setStatus(e.message, true);
-  }
-}
-
-async function addBattery() {
-  const num = id => {
-    const v = document.getElementById(id).value.trim();
-    return v === "" ? null : Number(v);
-  };
-  const str = id => {
-    const v = document.getElementById(id).value.trim();
-    return v === "" ? null : v;
-  };
+async function add() {
+  const num = id => { const v = $(id).value.trim(); return v === "" ? null : +v; };
+  const str = id => $(id).value.trim() || null;
   const data = {
-    name:            str("a-name"),
-    manufacturer:    str("a-man"),
-    chemistry:       str("a-chem"),
-    form_factor:     str("a-form"),
-    capacity_mah:    num("a-mah"),
-    voltage_v:       num("a-v"),
-    weight_g:        num("a-g"),
-    year_introduced: num("a-y"),
-    notes:           str("a-notes"),
-    rechargeable:    document.getElementById("a-rech").checked,
+    name: str("a-name"), manufacturer: str("a-manufacturer"),
+    chemistry: str("a-chemistry"), form_factor: str("a-form_factor"),
+    capacity_mah: num("a-capacity_mah"), voltage_v: num("a-voltage_v"),
+    weight_g: num("a-weight_g"), year_introduced: num("a-year_introduced"),
+    notes: str("a-notes"), rechargeable: $("a-rechargeable").checked,
   };
-  if (!data.name || !data.chemistry) {
-    setStatus("Name and chemistry are required.", true);
-    return;
-  }
-  try {
-    const { id } = await api("/api/batteries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    setStatus("Added id " + id);
-    for (const k of ["a-name","a-man","a-chem","a-form","a-mah","a-v","a-g","a-y","a-notes"])
-      document.getElementById(k).value = "";
-    document.getElementById("a-rech").checked = false;
-    loadRows();
-  } catch (e) {
-    setStatus(e.message, true);
-  }
+  if (!data.name || !data.chemistry) { $("status").textContent = "name and chemistry required"; return; }
+  await api("/api/batteries", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(data),
+  });
+  document.querySelectorAll('input[id^="a-"]').forEach(el => {
+    if (el.type === "checkbox") el.checked = false; else el.value = "";
+  });
+  loadAll();
 }
 
-async function loadStats() {
-  try {
-    const { rows } = await api("/api/stats");
-    document.querySelector("#stats-table tbody").innerHTML = rows.map(r =>
-      `<tr><td>${escapeHtml(r.chemistry)}</td><td>${r.count}</td><td>${r.avg_capacity_mah ?? ""}</td><td>${r.avg_voltage_v ?? ""}</td></tr>`
-    ).join("");
-    document.getElementById("stats-section").style.display = "";
-  } catch (e) {
-    setStatus(e.message, true);
-  }
+// Stats opens in the dialog so it's impossible to miss
+async function showStats() {
+  const {rows} = await api("/api/stats");
+  $("stats-grid").innerHTML =
+    "<thead><tr><th>Chemistry</th><th>n</th><th>avg mAh</th><th>avg V</th></tr></thead>" +
+    "<tbody>" + rows.map(r =>
+      `<tr><td>${r.chemistry}</td><td>${r.count}</td><td>${r.avg_capacity_mah ?? ""}</td><td>${r.avg_voltage_v ?? ""}</td></tr>`
+    ).join("") + "</tbody>";
+  $("stats-dlg").showModal();
 }
 
-loadRows();
+loadAll();
 </script>
 </body>
 </html>

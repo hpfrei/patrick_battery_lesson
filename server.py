@@ -52,11 +52,12 @@ def db_exec(sql, params=()):
 
 def list_batteries(qs):
     clauses, params = [], []
+    # Multi-value filters: ?chemistry=Li-ion&chemistry=NiMH → IN (?, ?)
     for field in ("chemistry", "form_factor", "manufacturer"):
-        v = (qs.get(field) or [""])[0].strip()
-        if v:
-            clauses.append(f"{field} LIKE ?")
-            params.append(f"%{v}%")
+        vals = [v for v in qs.get(field, []) if v]
+        if vals:
+            clauses.append(f"{field} IN ({','.join('?' * len(vals))})")
+            params.extend(vals)
     mc = (qs.get("min_capacity") or [""])[0].strip()
     if mc:
         clauses.append("capacity_mah >= ?")
