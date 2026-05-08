@@ -1,26 +1,36 @@
-"""TCP server: exposes batteries.db via a JSON-line protocol.
+"""HTTP server: serves the web UI and a JSON API over batteries.db.
 
-Wire format
------------
-Client opens a TCP connection. For each request it sends one JSON object
-followed by a newline. The server responds with one JSON object followed
-by a newline. The connection stays open for more requests.
-
-Each connected client is handled in its own thread.
+Endpoints
+---------
+GET    /                      → index.html (the web UI)
+GET    /api/batteries         → list rows; optional query params:
+                                  chemistry, form_factor, manufacturer, min_capacity
+POST   /api/batteries         → add a row (JSON body)
+DELETE /api/batteries/<id>    → delete a row
+GET    /api/stats             → row counts and averages grouped by chemistry
 
 Run:
-    py server.py          (listens on 127.0.0.1:5050)
+    py -3 server.py        (Windows)
+    python3 server.py      (Linux/macOS)
+
+The DB is auto-created from seed_db.py on first run.
+A browser tab opens automatically.
 """
 
+import http.server
 import json
 import os
-import socket
+import re
+import socketserver
 import sqlite3
-import threading
+import urllib.parse
+import webbrowser
 
 HOST = "127.0.0.1"
 PORT = 5050
-DB_PATH = os.path.join(os.path.dirname(__file__), "batteries.db")
+HERE = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(HERE, "batteries.db")
+INDEX_PATH = os.path.join(HERE, "index.html")
 
 COLUMNS = [
     "id", "name", "manufacturer", "chemistry", "form_factor",
@@ -29,118 +39,159 @@ COLUMNS = [
 ]
 
 
-def row_to_dict(row):
-    return {c: row[i] for i, c in enumerate(COLUMNS)}
-
-
-def handle_request(req):
-    """Dispatch one request dict to SQL, return a response dict."""
-    action = req.get("action")
+def db_exec(sql, params=()):
     con = sqlite3.connect(DB_PATH)
     try:
-        cur = con.cursor()
-
-        if action == "list":
-            cur.execute(f"SELECT {', '.join(COLUMNS)} FROM batteries ORDER BY id")
-            return {"ok": True, "rows": [row_to_dict(r) for r in cur.fetchall()]}
-
-        if action == "search":
-            clauses, params = [], []
-            for field in ("chemistry", "form_factor", "manufacturer"):
-                if req.get(field):
-                    clauses.append(f"{field} LIKE ?")
-                    params.append(f"%{req[field]}%")
-            if req.get("min_capacity") is not None:
-                clauses.append("capacity_mah >= ?")
-                params.append(int(req["min_capacity"]))
-            where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-            cur.execute(
-                f"SELECT {', '.join(COLUMNS)} FROM batteries {where} ORDER BY id",
-                params,
-            )
-            return {"ok": True, "rows": [row_to_dict(r) for r in cur.fetchall()]}
-
-        if action == "add":
-            d = req.get("data", {})
-            cur.execute(
-                """INSERT INTO batteries
-                   (name, manufacturer, chemistry, form_factor, capacity_mah,
-                    voltage_v, weight_g, rechargeable, year_introduced, notes)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (d.get("name"), d.get("manufacturer"), d.get("chemistry"),
-                 d.get("form_factor"), d.get("capacity_mah"),
-                 d.get("voltage_v"), d.get("weight_g"),
-                 1 if d.get("rechargeable") else 0,
-                 d.get("year_introduced"), d.get("notes")),
-            )
-            con.commit()
-            return {"ok": True, "id": cur.lastrowid}
-
-        if action == "delete":
-            cur.execute("DELETE FROM batteries WHERE id = ?", (int(req["id"]),))
-            con.commit()
-            return {"ok": True, "deleted": cur.rowcount}
-
-        if action == "stats":
-            cur.execute(
-                """SELECT chemistry,
-                          COUNT(*)                    AS n,
-                          ROUND(AVG(capacity_mah), 1) AS avg_mah,
-                          ROUND(AVG(voltage_v), 2)    AS avg_v
-                   FROM batteries
-                   GROUP BY chemistry
-                   ORDER BY n DESC"""
-            )
-            keys = ["chemistry", "count", "avg_capacity_mah", "avg_voltage_v"]
-            return {"ok": True, "rows": [dict(zip(keys, r)) for r in cur.fetchall()]}
-
-        return {"ok": False, "error": f"unknown action: {action!r}"}
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        cur = con.execute(sql, params)
+        rows = cur.fetchall()
+        con.commit()
+        return rows, cur.lastrowid, cur.rowcount
     finally:
         con.close()
 
 
-def serve_client(conn, addr):
-    print(f"[server] {addr} connected")
-    f = conn.makefile("rwb")
-    try:
-        for raw in f:
-            raw = raw.strip()
-            if not raw:
-                continue
+def list_batteries(qs):
+    clauses, params = [], []
+    for field in ("chemistry", "form_factor", "manufacturer"):
+        v = (qs.get(field) or [""])[0].strip()
+        if v:
+            clauses.append(f"{field} LIKE ?")
+            params.append(f"%{v}%")
+    mc = (qs.get("min_capacity") or [""])[0].strip()
+    if mc:
+        clauses.append("capacity_mah >= ?")
+        params.append(int(mc))
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    rows, _, _ = db_exec(
+        f"SELECT {', '.join(COLUMNS)} FROM batteries {where} ORDER BY id",
+        params,
+    )
+    return [dict(zip(COLUMNS, r)) for r in rows]
+
+
+def add_battery(d):
+    _, last, _ = db_exec(
+        """INSERT INTO batteries
+           (name, manufacturer, chemistry, form_factor, capacity_mah,
+            voltage_v, weight_g, rechargeable, year_introduced, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (d.get("name"), d.get("manufacturer"), d.get("chemistry"),
+         d.get("form_factor"), d.get("capacity_mah"),
+         d.get("voltage_v"), d.get("weight_g"),
+         1 if d.get("rechargeable") else 0,
+         d.get("year_introduced"), d.get("notes")),
+    )
+    return last
+
+
+def delete_battery(rid):
+    _, _, n = db_exec("DELETE FROM batteries WHERE id = ?", (rid,))
+    return n
+
+
+def chemistry_stats():
+    rows, _, _ = db_exec(
+        """SELECT chemistry,
+                  COUNT(*),
+                  ROUND(AVG(capacity_mah), 1),
+                  ROUND(AVG(voltage_v),   2)
+           FROM batteries
+           GROUP BY chemistry
+           ORDER BY COUNT(*) DESC"""
+    )
+    keys = ["chemistry", "count", "avg_capacity_mah", "avg_voltage_v"]
+    return [dict(zip(keys, r)) for r in rows]
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    server_version = "BatteryLab/2.0"
+
+    def _send_json(self, status, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_file(self, path, ctype):
+        with open(path, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_json(self):
+        n = int(self.headers.get("Content-Length", 0))
+        if n == 0:
+            return {}
+        return json.loads(self.rfile.read(n).decode("utf-8"))
+
+    def do_GET(self):
+        url = urllib.parse.urlparse(self.path)
+        if url.path in ("/", "/index.html"):
+            return self._send_file(INDEX_PATH, "text/html; charset=utf-8")
+        if url.path == "/api/batteries":
+            qs = urllib.parse.parse_qs(url.query)
+            return self._send_json(200, {"rows": list_batteries(qs)})
+        if url.path == "/api/stats":
+            return self._send_json(200, {"rows": chemistry_stats()})
+        self._send_json(404, {"error": "not found"})
+
+    def do_POST(self):
+        if self.path == "/api/batteries":
             try:
-                req = json.loads(raw)
+                data = self._read_json()
             except json.JSONDecodeError as e:
-                resp = {"ok": False, "error": f"bad JSON: {e}"}
-            else:
-                print(f"[server] {addr} -> {req}")
-                resp = handle_request(req)
-            f.write((json.dumps(resp) + "\n").encode("utf-8"))
-            f.flush()
-    except (ConnectionError, OSError):
-        pass
-    finally:
-        conn.close()
-        print(f"[server] {addr} disconnected")
+                return self._send_json(400, {"error": f"bad JSON: {e}"})
+            if not data.get("name") or not data.get("chemistry"):
+                return self._send_json(400, {"error": "name and chemistry are required"})
+            try:
+                return self._send_json(201, {"id": add_battery(data)})
+            except sqlite3.Error as e:
+                return self._send_json(400, {"error": f"{type(e).__name__}: {e}"})
+        self._send_json(404, {"error": "not found"})
+
+    def do_DELETE(self):
+        m = re.match(r"^/api/batteries/(\d+)$", self.path)
+        if m:
+            n = delete_battery(int(m.group(1)))
+            return self._send_json(200, {"deleted": n})
+        self._send_json(404, {"error": "not found"})
+
+    def log_message(self, fmt, *args):
+        print(f"[{self.log_date_time_string()}] {self.address_string()} {fmt % args}")
+
+
+class ThreadingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def ensure_db():
+    if not os.path.exists(DB_PATH):
+        print(f"[server] {os.path.basename(DB_PATH)} not found — seeding...")
+        import seed_db
+        seed_db.main()
 
 
 def main():
-    if not os.path.exists(DB_PATH):
-        raise SystemExit("batteries.db not found. Run 'py seed_db.py' first.")
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind((HOST, PORT))
-    s.listen()
-    print(f"[server] listening on {HOST}:{PORT}  (Ctrl+C to stop)")
+    ensure_db()
+    httpd = ThreadingServer((HOST, PORT), Handler)
+    url = f"http://{HOST}:{PORT}/"
+    print(f"[server] listening on {url}  (Ctrl+C to stop)")
     try:
-        while True:
-            conn, addr = s.accept()
-            threading.Thread(target=serve_client, args=(conn, addr), daemon=True).start()
+        webbrowser.open(url)
+    except Exception:
+        pass
+    try:
+        httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n[server] shutting down")
     finally:
-        s.close()
+        httpd.server_close()
 
 
 if __name__ == "__main__":

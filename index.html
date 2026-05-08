@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Battery Browser</title>
+<style>
+  :root { --bg:#fafafa; --line:#ddd; --pri:#2563eb; --bad:#dc2626; --muted:#6b7280; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; background: var(--bg); color: #111; }
+  header { background: #1f2937; color: #fff; padding: .8rem 1rem; }
+  header h1 { margin: 0; font-size: 1.1rem; }
+  main { padding: 1rem; max-width: 1150px; margin: 0 auto; }
+  section { background: #fff; padding: 1rem; border: 1px solid var(--line); border-radius: 6px; margin-top: 1rem; }
+  section h2 { margin: 0 0 .6rem; font-size: 1rem; }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: flex-end; }
+  label { display: flex; flex-direction: column; gap: 2px; font-size: .8rem; color: var(--muted); }
+  input, button { padding: .35rem .55rem; font: inherit; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  button { cursor: pointer; }
+  button.primary { background: var(--pri); color: #fff; border-color: var(--pri); }
+  button.danger  { background: var(--bad); color: #fff; border-color: var(--bad); padding: .15rem .4rem; font-size: .8rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { padding: .35rem .5rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { background: #f3f4f6; position: sticky; top: 0; }
+  tr:hover td { background: #f9fafb; }
+  #status { font-size: .85rem; color: var(--muted); margin-top: .6rem; min-height: 1.1em; }
+  #status.err { color: var(--bad); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .5rem; max-width: 800px; }
+  .grid label.wide { grid-column: 1 / -1; }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header><h1>🔋 Battery Browser</h1></header>
+<main>
+
+  <section>
+    <h2>Search</h2>
+    <div class="row">
+      <label>Chemistry      <input id="q-chem"  placeholder="Li-ion"></label>
+      <label>Form factor    <input id="q-form"  placeholder="18650"></label>
+      <label>Min mAh        <input id="q-mc"    type="number" min="0" placeholder="3000"></label>
+      <button class="primary" onclick="loadRows()">Search</button>
+      <button onclick="clearSearch()">Show all</button>
+      <button onclick="loadStats()">Stats</button>
+    </div>
+    <div id="status"></div>
+  </section>
+
+  <section>
+    <h2>Batteries</h2>
+    <table>
+      <thead><tr id="head"></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Add a battery</h2>
+    <div class="grid">
+      <label>Name *           <input id="a-name"></label>
+      <label>Manufacturer     <input id="a-man"></label>
+      <label>Chemistry *      <input id="a-chem"></label>
+      <label>Form factor      <input id="a-form"></label>
+      <label>Capacity (mAh)   <input id="a-mah"   type="number"></label>
+      <label>Voltage (V)      <input id="a-v"     type="number" step="0.01"></label>
+      <label>Weight (g)       <input id="a-g"     type="number" step="0.1"></label>
+      <label>Year introduced  <input id="a-y"     type="number"></label>
+      <label><input id="a-rech" type="checkbox" style="margin-right:6px"> Rechargeable</label>
+      <label class="wide">Notes <input id="a-notes"></label>
+    </div>
+    <p style="margin-top:.8rem"><button class="primary" onclick="addBattery()">Add</button></p>
+  </section>
+
+  <section id="stats-section" style="display:none">
+    <h2>Stats by chemistry</h2>
+    <table id="stats-table">
+      <thead><tr><th>Chemistry</th><th>Count</th><th>Avg mAh</th><th>Avg V</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+</main>
+
+<script>
+const COLS = ["id","name","manufacturer","chemistry","form_factor",
+              "capacity_mah","voltage_v","weight_g","rechargeable","year_introduced","notes"];
+
+function setStatus(msg, isError = false) {
+  const el = document.getElementById("status");
+  el.textContent = msg;
+  el.className = isError ? "err" : "";
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, opts);
+  let body = null;
+  try { body = await res.json(); } catch {}
+  if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
+  return body;
+}
+
+function escapeHtml(v) {
+  if (v === null || v === undefined) return "";
+  return String(v).replace(/[<>&"]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c]));
+}
+
+async function loadRows() {
+  const params = new URLSearchParams();
+  const chem = document.getElementById("q-chem").value.trim();
+  const form = document.getElementById("q-form").value.trim();
+  const mc   = document.getElementById("q-mc").value.trim();
+  if (chem) params.set("chemistry",   chem);
+  if (form) params.set("form_factor", form);
+  if (mc)   params.set("min_capacity", mc);
+  const qs = params.toString() ? "?" + params.toString() : "";
+  try {
+    const { rows } = await api("/api/batteries" + qs);
+    renderRows(rows);
+    setStatus(`${rows.length} row(s)`);
+  } catch (e) {
+    setStatus(e.message, true);
+  }
+}
+
+function clearSearch() {
+  for (const id of ["q-chem","q-form","q-mc"]) document.getElementById(id).value = "";
+  loadRows();
+}
+
+function renderRows(rows) {
+  document.getElementById("head").innerHTML =
+    COLS.map(c => `<th>${c}</th>`).join("") + "<th></th>";
+  const tbody = document.getElementById("rows");
+  tbody.innerHTML = rows.map(r => {
+    const cells = COLS.map(c => {
+      let v = r[c];
+      if (c === "rechargeable") v = v ? "yes" : "no";
+      return `<td>${escapeHtml(v)}</td>`;
+    }).join("");
+    return `<tr>${cells}<td><button class="danger" onclick="deleteRow(${r.id})">Delete</button></td></tr>`;
+  }).join("");
+}
+
+async function deleteRow(id) {
+  if (!confirm("Delete battery id " + id + "?")) return;
+  try {
+    await api("/api/batteries/" + id, { method: "DELETE" });
+    setStatus("Deleted id " + id);
+    loadRows();
+  } catch (e) {
+    setStatus(e.message, true);
+  }
+}
+
+async function addBattery() {
+  const num = id => {
+    const v = document.getElementById(id).value.trim();
+    return v === "" ? null : Number(v);
+  };
+  const str = id => {
+    const v = document.getElementById(id).value.trim();
+    return v === "" ? null : v;
+  };
+  const data = {
+    name:            str("a-name"),
+    manufacturer:    str("a-man"),
+    chemistry:       str("a-chem"),
+    form_factor:     str("a-form"),
+    capacity_mah:    num("a-mah"),
+    voltage_v:       num("a-v"),
+    weight_g:        num("a-g"),
+    year_introduced: num("a-y"),
+    notes:           str("a-notes"),
+    rechargeable:    document.getElementById("a-rech").checked,
+  };
+  if (!data.name || !data.chemistry) {
+    setStatus("Name and chemistry are required.", true);
+    return;
+  }
+  try {
+    const { id } = await api("/api/batteries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    setStatus("Added id " + id);
+    for (const k of ["a-name","a-man","a-chem","a-form","a-mah","a-v","a-g","a-y","a-notes"])
+      document.getElementById(k).value = "";
+    document.getElementById("a-rech").checked = false;
+    loadRows();
+  } catch (e) {
+    setStatus(e.message, true);
+  }
+}
+
+async function loadStats() {
+  try {
+    const { rows } = await api("/api/stats");
+    document.querySelector("#stats-table tbody").innerHTML = rows.map(r =>
+      `<tr><td>${escapeHtml(r.chemistry)}</td><td>${r.count}</td><td>${r.avg_capacity_mah ?? ""}</td><td>${r.avg_voltage_v ?? ""}</td></tr>`
+    ).join("");
+    document.getElementById("stats-section").style.display = "";
+  } catch (e) {
+    setStatus(e.message, true);
+  }
+}
+
+loadRows();
+</script>
+</body>
+</html>

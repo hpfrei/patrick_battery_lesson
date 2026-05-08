@@ -1,11 +1,11 @@
 # Battery Lab — Teacher's Guide (2 hours)
 
-A hands-on lab where students see a small but complete client/server stack:
-a Tkinter GUI talks to a Python TCP server that reads/writes a SQLite
-database of batteries.
+A hands-on lab where students see a small but complete **web** stack: a
+browser talks to a Python **HTTP server** that reads and writes a
+**SQLite** database of batteries.
 
-Everything is **standard library only**. No `pip install`. Tested with
-Python 3.10+.
+Everything is **standard library only**. No `pip install`, no Flask, no
+build tools. Tested with Python 3.10+.
 
 ---
 
@@ -16,7 +16,7 @@ Python 3.10+.
 >
 > - Python
 > - SQLite
-> - client/server
+> - client/server (web server / web browser)
 >
 > Topic: **batteries**. Stage the DB with data to play with.
 >
@@ -33,15 +33,16 @@ This repo is the deliverable. It also runs on Linux (see `README.md`).
 
 ## 0. Before class (you, the teacher)
 
-1. Push this folder to a Git host the students can reach (GitHub, Gitea,
-   your school's GitLab, etc.).
-2. Confirm every student PC has Python 3 with the **py launcher** (the
-   default Windows installer from python.org provides this and includes
-   Tkinter and sqlite3 — nothing extra to install).
-   - Quick test from `cmd`: `py -3 -c "import tkinter, sqlite3; print('ok')"`
-3. Make sure no firewall on the student machines blocks **localhost** TCP
-   (port 5050). The server only binds to 127.0.0.1 — no inbound network
-   permission is needed.
+1. Push this folder to a Git host the students can reach.
+2. Confirm every student PC has Python 3 (the **py launcher** on Windows;
+   `python3` on Linux). The default Windows installer from python.org
+   includes everything we need — sqlite3 and the standard library HTTP
+   server.
+3. Quick test:
+   - Windows cmd: `py -3 -c "import http.server, sqlite3; print('ok')"`
+   - Linux:       `python3 -c "import http.server, sqlite3; print('ok')"`
+4. Make sure students can reach **localhost**. The server binds only to
+   127.0.0.1 — no firewall rules needed.
 
 ## 1. Student quickstart (put this on the board)
 
@@ -49,119 +50,133 @@ This repo is the deliverable. It also runs on Linux (see `README.md`).
 git clone <your-repo-url>
 cd <repo-folder>
 
-1) double-click  setup.bat        (one time — creates batteries.db)
-2) double-click  run_server.bat   (leave this window open)
-3) double-click  run_client.bat   (the GUI)
+# Windows  → double-click run.bat
+# Linux    → ./run.sh
 ```
 
-If the GUI says "Connection failed", the server window isn't running yet.
+A browser tab opens automatically at **http://127.0.0.1:5050/**.
+The first run creates `batteries.db` and loads 20 sample rows.
 
 ---
 
 ## 2. The architecture (5-minute whiteboard)
 
 ```
-   +----------------+      JSON over TCP       +----------------+      SQL      +-------------+
-   |  client.py     |  <-------------------->  |  server.py     |  <--------->  | batteries.db|
-   |  (Tkinter GUI) |    127.0.0.1:5050        |  (sockets)     |               | (SQLite)    |
-   +----------------+                          +----------------+               +-------------+
+   +------------------+      HTTP       +------------------+      SQL      +-------------+
+   |  Browser         |  <----------->  |  server.py       |  <--------->  | batteries.db|
+   |  (index.html +   |    GET / POST   |  (http.server)   |               |  (SQLite)   |
+   |   fetch + JS)    |    DELETE       |                  |               +-------------+
+   +------------------+                 +------------------+
 ```
 
 Three layers, three responsibilities:
 
-- **Database** — knows facts. Doesn't know about users.
-- **Server** — knows the rules. Translates requests into SQL, returns rows.
-  Hides the database from clients.
-- **Client** — knows the user. Renders, accepts input, sends requests.
+- **Database** — knows facts. Doesn't know about HTTP.
+- **Server** — knows the rules. Translates URLs and JSON bodies into SQL,
+  returns JSON or HTML. The only process that ever opens the DB file.
+- **Client** — the *browser*. Renders HTML, accepts input, fires
+  `fetch()` calls. Could be replaced by `curl`, by a phone app, by
+  another script — the server doesn't care.
 
-Why split it? Many clients can talk to one server. The server is the only
-process that ever opens the DB file. Tomorrow we could replace Tkinter
-with a web page or a phone app — the server doesn't care.
+This is the same architecture as Twitter, GitHub, Gmail — just smaller.
 
 ---
 
 ## 3. Pacing (2 hours)
 
 ### 0:00 – 0:10 — Welcome & demo
-- Run `setup.bat`, `run_server.bat`, `run_client.bat` on the projector.
-- Click **Show all**, type `Li-ion` in Chemistry, click **Search**, then
-  **Stats**. Show the server console printing each request.
+- Run `run.bat` / `./run.sh` on the projector.
+- Browser opens. Type `Li-ion` in Chemistry → Search. Click **Stats**.
+- Watch the server console log each request:
+  `GET /api/batteries?chemistry=Li-ion HTTP/1.1 200 -`
 
 ### 0:10 – 0:20 — Whiteboard the architecture
 - The diagram above.
-- Ask: *"What happens between clicking Search and seeing rows?"* Walk the
-  signal path: button → JSON → socket → SQL → SQLite → rows → JSON → tree.
+- Ask: *"What happens between clicking Search and seeing rows?"* Walk
+  the signal path: button → JS `fetch` → HTTP GET → SQL → SQLite → rows
+  → JSON → `<table>`.
 
-### 0:20 – 0:35 — Read the code together (10 min/file, in this order)
-1. **`seed_db.py`** — schema, sample rows, `executemany`. Point out
-   `INTEGER PRIMARY KEY AUTOINCREMENT` and that the SQL lives in a string.
-2. **`server.py`** — show `socket.bind/listen/accept`, the `for raw in f`
-   read loop, and how `handle_request` dispatches on `action`. Highlight
-   the **parameterized queries** (`?` placeholders) and ask *why* — they
+### 0:20 – 0:35 — Read the code together (5 min/file)
+1. **`seed_db.py`** — schema + sample rows. Point out
+   `INTEGER PRIMARY KEY AUTOINCREMENT` and `executemany`.
+2. **`server.py`** — start at `Handler.do_GET`. Show how a URL maps to a
+   function. Then `do_POST` and `do_DELETE`. Highlight the
+   **parameterized queries** (`?` placeholders) and ask *why* — they
    prevent SQL injection.
-3. **`client.py`** — start at `BatteryClient.call`: write JSON + `\n`,
-   read one line, parse. Then look at how buttons in `_build_ui` call
-   `self.client.call(...)`.
+3. **`index.html`** — start at the `loadRows` function. Show how it
+   builds a query string, calls `fetch`, parses JSON, builds HTML. The
+   buttons in the page just call these JS functions.
 
-### 0:35 – 0:50 — Talk to the server *without* the GUI
-Open a third terminal and run this one-liner; great "aha" moment:
+### 0:35 – 0:50 — Talk to the server *without* the browser
+Open a terminal alongside the running server. The server is just HTTP,
+so any HTTP client works:
 
 ```bash
-py -3 -c "import socket,json; s=socket.create_connection(('127.0.0.1',5050)); s.sendall(b'{\"action\":\"stats\"}\n'); print(s.makefile('rb').readline().decode())"
+# Windows or Linux — curl is built into modern Windows 10/11
+curl http://127.0.0.1:5050/api/stats
+curl "http://127.0.0.1:5050/api/batteries?chemistry=Li-ion&min_capacity=3000"
+
+curl -X POST http://127.0.0.1:5050/api/batteries ^
+     -H "Content-Type: application/json" ^
+     -d "{\"name\":\"Test\",\"chemistry\":\"NiMH\",\"capacity_mah\":1500,\"rechargeable\":true}"
+
+curl -X DELETE http://127.0.0.1:5050/api/batteries/21
 ```
 
-Or have students write `query.py`:
+Or from Python:
 
 ```python
-import socket, json
-s = socket.create_connection(("127.0.0.1", 5050))
-f = s.makefile("rwb")
-f.write(b'{"action":"search","chemistry":"Li-ion"}\n'); f.flush()
-print(json.loads(f.readline()))
+import urllib.request, json
+print(json.loads(urllib.request.urlopen("http://127.0.0.1:5050/api/stats").read()))
 ```
 
-Drives the point home: the GUI is just *one* client.
+Drives the point home: **the browser is just one client.** The server
+speaks HTTP, and that's a public contract.
 
 ### 0:50 – 1:00 — Break
 
 ### 1:00 – 1:35 — Exercise A (pick one — pair students up)
 
-**A1. Add an `update` action.**
-- In `server.py`, add an `if action == "update":` branch using
-  `UPDATE batteries SET ... WHERE id = ?`.
-- In `client.py`, add an "Edit selected..." button that opens a dialog
-  pre-filled from the selected row.
-- *Hint:* you can copy `AddDialog` and tweak it.
+**A1. Add a `PUT /api/batteries/<id>` endpoint to update a row.**
+- In `server.py`, add `do_PUT`. Use `UPDATE batteries SET ... WHERE id = ?`.
+- In `index.html`, add an "Edit" button per row that opens a small form
+  pre-filled with the row's values, then `fetch(..., {method: "PUT"})`.
 
 **A2. Add a new column `country_of_origin TEXT`.**
-- Edit the schema in `seed_db.py`, re-run `setup.bat`.
-- Add it to `COLUMNS` in `server.py` and to `App.COLS` in `client.py`.
-- Add a country field to the Add dialog.
-- *Discussion:* in a real system you can't just drop the table —
+- Edit the schema in `seed_db.py`, delete `batteries.db`, restart.
+- Add the column to `COLUMNS` in `server.py` and to the `COLS` array
+  and add-form in `index.html`.
+- *Discussion:* in a real system you can't just delete the data —
   introduces the idea of **migrations**.
 
-**A3. Sort by capacity (descending) when a checkbox is ticked.**
-- Add a parameter `sort_by` to the `list`/`search` actions on the server.
-- Whitelist allowed values (`id`, `capacity_mah`, `voltage_v`) — never
-  paste user input directly into SQL. Why? **SQL injection.**
+**A3. Add a sort dropdown (capacity / voltage / year).**
+- Add `?sort_by=capacity_mah` (and `&sort_dir=desc`) to the list endpoint.
+- **Whitelist** allowed values on the server — never paste user input
+  directly into SQL. Why? **SQL injection.**
 
-### 1:35 – 1:50 — Exercise B: two clients, one server
-- Have student X add a battery from their GUI.
-- Have student Y on the same machine click **Show all**.
-- They see X's row. Discuss: the server is the single source of truth.
-- Optional: change `HOST = "0.0.0.0"` in `server.py` and connect from a
-  neighbour's PC by IP. Discuss why production servers need **auth** and
-  **TLS** before exposing a port.
+### 1:35 – 1:50 — Exercise B: many clients, one server
+- One student adds a battery from their browser.
+- A neighbour clicks **Show all** in their browser tab.
+- Discuss: the server is the single source of truth.
+- Optional, on the same machine: open a second tab, watch the server log
+  show two distinct sources hitting the same endpoint.
+- Optional, networked: change `HOST = "0.0.0.0"` in `server.py` and have
+  a neighbour visit `http://<your-IP>:5050/`. **Stop and discuss**: in
+  the real world this is where you'd add **HTTPS** and **authentication**
+  before exposing a port.
 
 ### 1:50 – 2:00 — Wrap-up & Q&A
 Talking points to close:
 - We used `?` placeholders → safe from SQL injection. Why string-concat
   would be unsafe.
-- JSON-line is a tiny, hand-rolled protocol. HTTP/REST is the same idea
-  with more conventions (verbs, status codes, headers).
-- One thread per connection is fine for a class; production servers use
-  thread pools, async I/O, or processes.
-- Where would *you* add login? Where would you add caching?
+- HTTP is just a text protocol on top of TCP — no magic. Verbs (GET,
+  POST, DELETE), URLs, status codes, headers, optional body. That's it.
+- Frameworks like Flask or FastAPI give you routing, validation, and
+  templating — same architecture, less hand-rolled boilerplate.
+- One thread per request is fine for a class; production servers add
+  thread pools, async I/O, reverse proxies (nginx), caching, and
+  database connection pools.
+- Where would *you* add login? Where would caching help?
 
 ---
 
@@ -169,37 +184,39 @@ Talking points to close:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `py is not recognized` | Python not installed, or "Add to PATH" was unchecked | Reinstall Python from python.org with both checkboxes ticked |
-| Client window flashes "Connection failed" | Server isn't running, or `setup.bat` was skipped | Run `setup.bat`, then `run_server.bat`, then `run_client.bat` |
-| `OSError: [WinError 10048] ... only one usage` | Server already running in another window | Close the other server window, or change `PORT` in both `server.py` and `client.py` |
-| `batteries.db not found` | They started the server before seeding | Run `setup.bat` |
-| GUI shows old data after editing the DB by hand | Client cached nothing — but a query may have been cached on tree | Click **Show all** |
+| `'py' is not recognized` (Windows) | Python not installed, or "Add to PATH" was unchecked | Reinstall from python.org with both checkboxes ticked |
+| `python3: command not found` (Linux) | Python 3 not installed | `sudo apt install python3` (or your distro's equivalent) |
+| Browser shows "Unable to connect" | Server isn't running | Start `run.bat` / `./run.sh`, watch its console for the URL |
+| Server: `[Errno 98]` / `WinError 10048` | Another process is on port 5050 | Close it, or change `PORT` in `server.py` |
+| Page loads but table is empty | Browser cached an old page | Hard refresh: Ctrl+F5 |
+| Edits to `index.html` don't show up | Same — browser cache | Ctrl+F5, or open DevTools → Network → "Disable cache" |
+| Stats look wrong after edits | The server is the source of truth — click **Show all** | Or reload the page |
 
 ---
 
-## 5. Cheat sheet — protocol reference
+## 5. Cheat sheet — HTTP API
 
-All requests and responses are a single JSON object on one line.
+| Method | Path                       | Body                       | Returns                        |
+|--------|----------------------------|----------------------------|--------------------------------|
+| GET    | `/`                        | —                          | `index.html` (the web UI)      |
+| GET    | `/api/batteries`           | —                          | `{"rows": [...]}`              |
+| GET    | `/api/batteries?chemistry=Li-ion&min_capacity=3000` | — | filtered `{"rows": [...]}` |
+| POST   | `/api/batteries`           | `{"name":..., "chemistry":..., ...}` | `201 {"id": 21}`     |
+| DELETE | `/api/batteries/21`        | —                          | `{"deleted": 1}`               |
+| GET    | `/api/stats`               | —                          | `{"rows": [...]}` (by chemistry) |
 
-| Request                                                    | Response                          |
-|------------------------------------------------------------|-----------------------------------|
-| `{"action":"list"}`                                        | `{"ok":true,"rows":[...]}`        |
-| `{"action":"search","chemistry":"Li-ion","min_capacity":3000}` | `{"ok":true,"rows":[...]}`    |
-| `{"action":"add","data":{"name":"...","chemistry":"NiMH",...}}` | `{"ok":true,"id":21}`        |
-| `{"action":"delete","id":21}`                              | `{"ok":true,"deleted":1}`         |
-| `{"action":"stats"}`                                       | `{"ok":true,"rows":[...]}`        |
-
-Errors always come back as `{"ok": false, "error": "..."}`.
+Errors come back as `4xx` with `{"error": "..."}` JSON.
 
 ---
 
 ## 6. Files in this lab
 
-- `seed_db.py` — creates `batteries.db` and inserts ~20 sample rows.
-- `server.py`  — TCP server on `127.0.0.1:5050`.
-- `client.py`  — Tkinter GUI client.
-- `setup.bat`, `run_server.bat`, `run_client.bat` — Windows launchers.
-- `TEACHER.md` — this file.
+- `seed_db.py`  — creates `batteries.db` and inserts 20 sample rows.
+- `server.py`   — HTTP server on `127.0.0.1:5050`.
+- `index.html`  — the web UI (HTML + CSS + vanilla JS, single file).
+- `run.bat`, `run.sh` — start the server (and open the browser).
+- `README.md`   — student-facing install & run instructions.
+- `TEACHER.md`  — this file.
 
-Good luck — and may your students leave understanding that "client/server"
-is not magic, just two programs that agreed on a protocol.
+Good luck — and may your students leave understanding that "web app" is
+not magic, just two programs that agreed on **HTTP**.
