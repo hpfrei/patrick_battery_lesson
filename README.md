@@ -19,6 +19,46 @@ exercises.
 
 ---
 
+## Install on Linux
+
+Most distros ship Python 3 already, but on Debian/Ubuntu the Tkinter
+module is a separate package.
+
+```bash
+# Debian / Ubuntu / WSL
+sudo apt update
+sudo apt install -y python3 python3-tk git
+
+# Fedora
+sudo dnf install -y python3 python3-tkinter git
+
+# Arch
+sudo pacman -S --needed python tk git
+```
+
+Verify:
+
+```bash
+python3 -c "import tkinter, sqlite3; print('ok')"
+```
+
+Clone and run:
+
+```bash
+git clone https://github.com/hpfrei/patrick_battery_lesson.git
+cd patrick_battery_lesson
+
+./setup.sh        # one-time DB seed
+./run_server.sh   # leave this terminal open
+./run_client.sh   # in a second terminal
+```
+
+> WSL note: WSLg (Windows 11 / recent Windows 10) renders the Tk window
+> automatically. On older WSL you need an X server (e.g. VcXsrv) and
+> `export DISPLAY=:0`.
+
+---
+
 ## Install on Windows
 
 ### 1. Install Python
@@ -63,13 +103,15 @@ cd patrick_battery_lesson
 
 ## Run it
 
-Double-click these files **in this order**, from File Explorer:
+Run these **in this order**:
 
-| #  | File              | What it does                                         |
-|----|-------------------|------------------------------------------------------|
-| 1  | `setup.bat`       | Creates `batteries.db` and loads 20 sample rows. **Run this once.** |
-| 2  | `run_server.bat`  | Starts the server. **Leave this window open** while you use the app. |
-| 3  | `run_client.bat`  | Opens the GUI. You can run this multiple times for multiple clients. |
+| #  | Windows           | Linux               | What it does                                         |
+|----|-------------------|---------------------|------------------------------------------------------|
+| 1  | `setup.bat`       | `./setup.sh`        | Creates `batteries.db` and loads 20 sample rows. **Run this once.** |
+| 2  | `run_server.bat`  | `./run_server.sh`   | Starts the server. **Leave this window open** while you use the app. |
+| 3  | `run_client.bat`  | `./run_client.sh`   | Opens the GUI. You can run this multiple times for multiple clients. |
+
+On Windows you can double-click the `.bat` files from File Explorer.
 
 When you are done, close the GUI window and press `Ctrl+C` in the server
 window (or just close it).
@@ -124,9 +166,9 @@ Supported actions: `list`, `search`, `add`, `delete`, `stats`. See
 seed_db.py        Creates batteries.db and inserts 20 sample rows
 server.py         TCP server on 127.0.0.1:5050, JSON-line protocol
 client.py         Tkinter GUI client
-setup.bat         Runs seed_db.py
-run_server.bat    Runs server.py
-run_client.bat    Runs client.py
+setup.bat / setup.sh             Runs seed_db.py
+run_server.bat / run_server.sh   Runs server.py
+run_client.bat / run_client.sh   Runs client.py
 TEACHER.md        2-hour lesson plan with exercises
 README.md         You are here
 ```

@@ -9,6 +9,28 @@ Python 3.10+.
 
 ---
 
+## Original brief (what was asked for)
+
+> I want a solution for a teacher to hand out to students for a 2-hour
+> session using:
+>
+> - Python
+> - SQLite
+> - client/server
+>
+> Topic: **batteries**. Stage the DB with data to play with.
+>
+> GUI with interactivity.
+>
+> And a script for the teacher.
+>
+> Note: students must `git clone` and it must run directly on their
+> Windows PCs.
+
+This repo is the deliverable. It also runs on Linux (see `README.md`).
+
+---
+
 ## 0. Before class (you, the teacher)
 
 1. Push this folder to a Git host the students can reach (GitHub, Gitea,
